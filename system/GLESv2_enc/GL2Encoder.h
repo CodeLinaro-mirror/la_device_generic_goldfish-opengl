@@ -75,9 +75,10 @@ private:
                           GLenum type, GLsizei count,
                           int minIndex);
     void getBufferIndexRange(BufferData* buf, const void* dataWithOffset,
-                             GLenum type, GLsizei count, GLintptr offset,
+                             GLenum type, size_t count, size_t offset,
                              int* minIndex_out, int* maxIndex_out);
-    void sendVertexAttributes(GLint first, GLsizei count);
+    void getVBOUsage(bool* hasClientArrays, bool* hasVBOs) const;
+    void sendVertexAttributes(GLint first, GLsizei count, bool hasClientArrays);
     void flushDrawCall();
 
     bool updateHostTexture2DBinding(GLenum texUnit, GLenum newTarget);
