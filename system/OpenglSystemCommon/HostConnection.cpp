@@ -154,6 +154,7 @@ ExtendedRCEncoderContext *HostConnection::rcEncoder()
         setChecksumHelper(m_rcEnc);
         queryAndSetSyncImpl(m_rcEnc);
         queryAndSetDmaImpl(m_rcEnc);
+        queryAndSetGLESMaxVersion(m_rcEnc);
         processPipeInit(m_rcEnc);
     }
     return m_rcEnc;
@@ -226,7 +227,7 @@ void HostConnection::setChecksumHelper(ExtendedRCEncoderContext *rcEnc) {
 
 void HostConnection::queryAndSetSyncImpl(ExtendedRCEncoderContext *rcEnc) {
     const std::string& glExtensions = queryGLExtensions(rcEnc);
-#if PLATFORM_SDK_VERSION <= 16 || PLATFORM_SDK_VERSION >= 25 || ((!defined(__i386__) && !defined(__x86_64__)))
+#if PLATFORM_SDK_VERSION <= 16 || (!defined(__i386__) && !defined(__x86_64__))
     rcEnc->setSyncImpl(SYNC_IMPL_NONE);
 #else
     if (glExtensions.find(kRCNativeSync) != std::string::npos) {
@@ -239,13 +240,34 @@ void HostConnection::queryAndSetSyncImpl(ExtendedRCEncoderContext *rcEnc) {
 
 void HostConnection::queryAndSetDmaImpl(ExtendedRCEncoderContext *rcEnc) {
     std::string glExtensions = queryGLExtensions(rcEnc);
-#if PLATFORM_SDK_VERSION <= 16 || PLATFORM_SDK_VERSION >= 25 || ((!defined(__i386__) && !defined(__x86_64__)))
+#if PLATFORM_SDK_VERSION <= 16 || (!defined(__i386__) && !defined(__x86_64__))
     rcEnc->setDmaImpl(DMA_IMPL_NONE);
 #else
     if (glExtensions.find(kDmaExtStr_v1) != std::string::npos) {
         rcEnc->setDmaImpl(DMA_IMPL_v1);
     } else {
         rcEnc->setDmaImpl(DMA_IMPL_NONE);
+    }
+#endif
+}
+
+void HostConnection::queryAndSetGLESMaxVersion(ExtendedRCEncoderContext* rcEnc) {
+    std::string glExtensions = queryGLExtensions(rcEnc);
+#if PLATFORM_SDK_VERSION <= 22 || (!defined(__i386__) && !defined(__x86_64__))
+    rcEnc->setGLESMaxVersion(GLES_MAX_VERSION_2);
+#else
+    if (glExtensions.find(kGLESMaxVersion_2) != std::string::npos) {
+        rcEnc->setGLESMaxVersion(GLES_MAX_VERSION_2);
+    } else if (glExtensions.find(kGLESMaxVersion_3_0) != std::string::npos) {
+        rcEnc->setGLESMaxVersion(GLES_MAX_VERSION_3_0);
+    } else if (glExtensions.find(kGLESMaxVersion_3_1) != std::string::npos) {
+        rcEnc->setGLESMaxVersion(GLES_MAX_VERSION_3_1);
+    } else if (glExtensions.find(kGLESMaxVersion_3_2) != std::string::npos) {
+        rcEnc->setGLESMaxVersion(GLES_MAX_VERSION_3_2);
+    } else {
+        ALOGW("Unrecognized GLES max version string in extensions: %s",
+              glExtensions.c_str());
+        rcEnc->setGLESMaxVersion(GLES_MAX_VERSION_2);
     }
 #endif
 }
