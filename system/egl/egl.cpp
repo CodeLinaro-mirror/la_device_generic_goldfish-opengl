@@ -812,6 +812,7 @@ EGLBoolean eglGetConfigAttrib(EGLDisplay dpy, EGLConfig config, EGLint attribute
     }
     else
     {
+        ALOGD("%s: bad attrib 0x%x", __FUNCTION__, attribute);
         RETURN_ERROR(EGL_FALSE, EGL_BAD_ATTRIBUTE);
     }
 }
@@ -1254,14 +1255,20 @@ EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_c
     EGLint context_flags = 0;
     EGLint profile_mask = 0;
     EGLint reset_notification_strategy = 0;
+
+    bool wantedMajorVersion = false;
+    bool wantedMinorVersion = false;
+
     while (attrib_list && attrib_list[0] != EGL_NONE) {
            EGLint attrib_val = attrib_list[1];
         switch(attrib_list[0]) {
         case EGL_CONTEXT_MAJOR_VERSION_KHR:
             majorVersion = attrib_val;
+            wantedMajorVersion = true;
             break;
         case EGL_CONTEXT_MINOR_VERSION_KHR:
             minorVersion = attrib_val;
+            wantedMinorVersion = true;
             break;
         case EGL_CONTEXT_FLAGS_KHR:
             if ((attrib_val | EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR) ||
@@ -1298,6 +1305,40 @@ EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_c
 
     // Support up to GLES 3.2 depending on advertised version from the host system.
     DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_NO_CONTEXT);
+    if (rcEnc->getGLESMaxVersion() >= GLES_MAX_VERSION_3_0) {
+        if (!wantedMajorVersion) {
+            majorVersion = 1;
+            wantedMinorVersion = false;
+        }
+
+        if (wantedMajorVersion &&
+            majorVersion == 2) {
+            majorVersion = 3;
+            wantedMinorVersion = false;
+        }
+
+        if (majorVersion == 3 && !wantedMinorVersion) {
+            switch (rcEnc->getGLESMaxVersion()) {
+                case GLES_MAX_VERSION_3_0:
+                    minorVersion = 0;
+                    break;
+                case GLES_MAX_VERSION_3_1:
+                    minorVersion = 1;
+                    break;
+                case GLES_MAX_VERSION_3_2:
+                    minorVersion = 2;
+                    break;
+                default:
+                    minorVersion = 0;
+                    break;
+            }
+        }
+    } else {
+        if (!wantedMajorVersion) {
+            majorVersion = 1;
+        }
+    }
+
     switch (majorVersion) {
     case 1:
     case 2:
@@ -1352,7 +1393,6 @@ EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_c
     if (majorVersion == 3 && minorVersion == 2) {
         rcMajorVersion = 4;
     }
-    ALOGD("%s: maj %d min %d rcv %d", __FUNCTION__, majorVersion, minorVersion, rcMajorVersion);
     uint32_t rcContext = rcEnc->rcCreateContext(rcEnc, (uintptr_t)config, rcShareCtx, rcMajorVersion);
     if (!rcContext) {
         ALOGE("rcCreateContext returned 0");
@@ -1360,6 +1400,7 @@ EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_c
     }
 
     EGLContext_t * context = new EGLContext_t(dpy, config, shareCtx, majorVersion, minorVersion);
+    ALOGD("%s: %p: maj %d min %d rcv %d", __FUNCTION__, context, majorVersion, minorVersion, rcMajorVersion);
     if (!context) {
         ALOGE("could not alloc egl context!");
         setErrorReturn(EGL_BAD_ALLOC, EGL_NO_CONTEXT);
@@ -1443,6 +1484,8 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
 
     //Now make the local bind
     if (context) {
+
+        ALOGD("%s: %p: ver %d %d", __FUNCTION__, context, context->majorVersion, context->minorVersion);
         // This is a nontrivial context.
         // The thread cannot be gralloc-only anymore.
         hostCon->setGrallocOnly(false);
@@ -1495,7 +1538,7 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
                     max_draw_buffers);
         }
 
-        //set the client state
+        // set the client state and share group
         if (context->majorVersion > 1) {
             hostCon->gl2Encoder()->setClientStateMakeCurrent(
                     contextState,
@@ -1534,6 +1577,10 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
                 s_display.gles2_iface()->init();
                 hostCon->gl2Encoder()->setInitialized();
                 ClientAPIExts::initClientFuncs(s_display.gles2_iface(), 1);
+            }
+            const char* exts = getGLString(GL_EXTENSIONS);
+            if (exts) {
+                hostCon->gl2Encoder()->setExtensions(exts);
             }
         }
         else {

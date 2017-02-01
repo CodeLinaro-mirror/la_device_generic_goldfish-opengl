@@ -26,6 +26,8 @@
 
 #include "GL2Encoder.h"
 
+#include <string>
+
 namespace GLESv2Validation {
 
 extern GLbitfield allBufferMapAccessFlags;
@@ -54,11 +56,13 @@ GLsizei compressedTexImageSize(GLenum internalformat, GLsizei width, GLsizei hei
 
 bool isCompressedFormat(GLenum internalformat);
 bool supportedCompressedFormat(GL2Encoder* ctx, GLenum internalformat);
-bool filterableTexFormat(GLenum internalformat);
+
 bool unsizedFormat(GLenum format);
-bool colorRenderableFormat(GLenum internalformat);
-bool depthRenderableFormat(GLenum internalformat);
-bool stencilRenderableFormat(GLenum internalformat);
+
+bool filterableTexFormat(GL2Encoder* ctx, GLenum internalformat);
+bool colorRenderableFormat(GL2Encoder* ctx, GLenum internalformat);
+bool depthRenderableFormat(GL2Encoder* ctx, GLenum internalformat);
+bool stencilRenderableFormat(GL2Encoder* ctx, GLenum internalformat);
 
 bool isCubeMapTarget(GLenum target);
 
@@ -68,6 +72,11 @@ bool pixelFormat(GL2Encoder* ctx, GLenum format);
 bool pixelInternalFormat(GLenum internalformat);
 
 bool shaderType(GL2Encoder* ctx, GLenum type);
+
+bool internalFormatTarget(GL2Encoder* ctx, GLenum target);
+
+std::string vertexAttribIndexRangeErrorMsg(GL2Encoder* ctx, GLuint index);
+
 } // namespace GLESv2Validation
 
 #endif
