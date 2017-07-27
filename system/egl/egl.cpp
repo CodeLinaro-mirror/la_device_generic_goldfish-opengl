@@ -29,7 +29,6 @@
 #include "eglContext.h"
 #include "ClientAPIExts.h"
 #include "EGLImage.h"
-#include "goldfishHwc2.h"
 #include "ProcessPipe.h"
 
 #include "GLEncoder.h"
@@ -38,6 +37,10 @@
 #endif
 
 #include <GLES3/gl31.h>
+
+#if PLATFORM_SDK_VERSION < 18
+#define override
+#endif
 
 #if PLATFORM_SDK_VERSION >= 16
 #include <system/window.h>
@@ -144,6 +147,18 @@ const char *  eglStrError(EGLint err)
         return ret; \
     }
 
+#define DEFINE_AND_VALIDATE_HOST_CONNECTION_FOR_TLS(ret, tls) \
+    HostConnection *hostCon = HostConnection::getWithThreadInfo(tls); \
+    if (!hostCon) { \
+        ALOGE("egl: Failed to get host connection\n"); \
+        return ret; \
+    } \
+    ExtendedRCEncoderContext *rcEnc = hostCon->rcEncoder(); \
+    if (!rcEnc) { \
+        ALOGE("egl: Failed to get renderControl encoder context\n"); \
+        return ret; \
+    }
+
 #define VALIDATE_CONTEXT_RETURN(context,ret)  \
     if (!(context)) {                         \
         RETURN_ERROR(ret,EGL_BAD_CONTEXT);    \
@@ -159,6 +174,11 @@ const char *  eglStrError(EGLint err)
 // The one and only supported display object.
 static eglDisplay s_display;
 
+// Extra defines not in the official EGL spec yet,
+// but required in Android CTS.
+
+#define EGL_TIMESTAMPS_ANDROID 0x314D
+
 EGLContext_t::EGLContext_t(EGLDisplay dpy, EGLConfig config, EGLContext_t* shareCtx, int maj, int min) :
     dpy(dpy),
     config(config),
@@ -169,7 +189,7 @@ EGLContext_t::EGLContext_t(EGLDisplay dpy, EGLConfig config, EGLContext_t* share
     versionString(NULL),
     majorVersion(maj),
     minorVersion(min),
-    vendorString(NULL),
+    vendorString(NULL) ,
     rendererString(NULL),
     shaderVersionString(NULL),
     extensionString(NULL),
@@ -260,6 +280,9 @@ struct egl_surface_t {
     void        setTextureTarget(EGLint _texTarget) { texTarget = _texTarget; }
     EGLint      getTextureTarget() { return texTarget; }
 
+    virtual     void setCollectingTimestamps(EGLint collect) { }
+    virtual     EGLint isCollectingTimestamps() const { return EGL_FALSE; }
+
 private:
     //
     //Surface attributes
@@ -321,6 +344,11 @@ struct egl_window_surface_t : public egl_surface_t {
     virtual void       setSwapInterval(int interval);
     virtual EGLBoolean swapBuffers();
 
+    virtual     void        setCollectingTimestamps(EGLint collect)
+        override { collectingTimestamps = (collect == EGL_TRUE) ? true : false; }
+    virtual     EGLint isCollectingTimestamps() const override { return collectingTimestamps ? EGL_TRUE : EGL_FALSE; }
+
+
 private:
     egl_window_surface_t(
             EGLDisplay dpy, EGLConfig config, EGLint surfType,
@@ -329,6 +357,7 @@ private:
 
     ANativeWindow*              nativeWindow;
     android_native_buffer_t*    buffer;
+    bool collectingTimestamps;
 };
 
 egl_window_surface_t::egl_window_surface_t (
@@ -336,7 +365,8 @@ egl_window_surface_t::egl_window_surface_t (
         ANativeWindow* window)
 :   egl_surface_t(dpy, config, surfType),
     nativeWindow(window),
-    buffer(NULL)
+    buffer(NULL),
+    collectingTimestamps(false)
 {
     // keep a reference on the window
     nativeWindow->common.incRef(&nativeWindow->common);
@@ -367,8 +397,6 @@ EGLBoolean egl_window_surface_t::init()
     }
     rcEnc->rcSetWindowColorBuffer(rcEnc, rcSurface,
             ((cb_handle_t*)(buffer->handle))->hostHandle);
-
-    surfaceInterface_setAsyncModeForWindow((void*)nativeWindow);
 
     return EGL_TRUE;
 }
@@ -1085,6 +1113,9 @@ EGLBoolean eglQuerySurface(EGLDisplay dpy, EGLSurface eglSurface, EGLint attribu
             // ignored when creating the surface, return default
             *value = EGL_VG_ALPHA_FORMAT_NONPRE;
             break;
+        case EGL_TIMESTAMPS_ANDROID:
+            *value = surface->isCollectingTimestamps();
+            break;
         //TODO: complete other attributes
         default:
             ALOGE("eglQuerySurface %x  EGL_BAD_ATTRIBUTE", attribute);
@@ -1112,39 +1143,38 @@ EGLBoolean eglWaitClient()
     return eglWaitGL();
 }
 
+// We may need to trigger this directly from the TLS destructor.
+static EGLBoolean s_eglReleaseThreadImpl(EGLThreadInfo* tInfo) {
+    if (!tInfo) return EGL_TRUE;
+
+    tInfo->eglError = EGL_SUCCESS;
+    EGLContext_t* context = tInfo->currentContext;
+
+    if (!context) return EGL_TRUE;
+
+    // The following code is doing pretty much the same thing as
+    // eglMakeCurrent(&s_display, EGL_NO_CONTEXT, EGL_NO_SURFACE, EGL_NO_SURFACE)
+    // with the only issue that we do not require a valid display here.
+    DEFINE_AND_VALIDATE_HOST_CONNECTION_FOR_TLS(EGL_FALSE, tInfo);
+    // We are going to call makeCurrent on the null context and surface
+    // anyway once we are on the host, so skip rcMakeCurrent here.
+    // rcEnc->rcMakeCurrent(rcEnc, 0, 0, 0);
+    context->flags &= ~EGLContext_t::IS_CURRENT;
+    if (context->deletePending) {
+        if (context->rcContext) {
+            rcEnc->rcDestroyContext(rcEnc, context->rcContext);
+            context->rcContext = 0;
+        }
+        delete context;
+    }
+    tInfo->currentContext = 0;
+
+    return EGL_TRUE;
+}
+
 EGLBoolean eglReleaseThread()
 {
-    EGLThreadInfo *tInfo = getEGLThreadInfo();
-    if (tInfo) {
-        tInfo->eglError = EGL_SUCCESS;
-        EGLContext_t* context = tInfo->currentContext;
-        if (context) {
-            // The following code is doing pretty much the same thing as
-            // eglMakeCurrent(&s_display, EGL_NO_CONTEXT, EGL_NO_SURFACE, EGL_NO_SURFACE)
-            // with the only issue that we do not require a valid display here.
-            DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_FALSE);
-            rcEnc->rcMakeCurrent(rcEnc, 0, 0, 0);
-             if (context->majorVersion > 1) {
-                hostCon->gl2Encoder()->setClientState(NULL);
-                hostCon->gl2Encoder()->setSharedGroup(GLSharedGroupPtr());
-            }
-            else {
-                hostCon->glEncoder()->setClientState(NULL);
-                hostCon->glEncoder()->setSharedGroup(GLSharedGroupPtr());
-            }
-            context->flags &= ~EGLContext_t::IS_CURRENT;
-
-            if (context->deletePending) {
-                if (context->rcContext) {
-                    rcEnc->rcDestroyContext(rcEnc, context->rcContext);
-                    context->rcContext = 0;
-                }
-                delete context;
-            }
-            tInfo->currentContext = 0;
-        }
-    }
-    return EGL_TRUE;
+    return s_eglReleaseThreadImpl(getEGLThreadInfo());
 }
 
 EGLSurface eglCreatePbufferFromClientBuffer(EGLDisplay dpy, EGLenum buftype, EGLClientBuffer buffer, EGLConfig config, const EGLint *attrib_list)
@@ -1178,7 +1208,6 @@ EGLBoolean eglSurfaceAttrib(EGLDisplay dpy, EGLSurface surface, EGLint attribute
     switch (attribute) {
     case EGL_MIPMAP_LEVEL:
         return true;
-        break;
     case EGL_MULTISAMPLE_RESOLVE:
     {
         if (value == EGL_MULTISAMPLE_RESOLVE_BOX) {
@@ -1189,7 +1218,6 @@ EGLBoolean eglSurfaceAttrib(EGLDisplay dpy, EGLSurface surface, EGLint attribute
             }
         }
         return true;
-        break;
     }
     case EGL_SWAP_BEHAVIOR:
         if (value == EGL_BUFFER_PRESERVED) {
@@ -1200,7 +1228,10 @@ EGLBoolean eglSurfaceAttrib(EGLDisplay dpy, EGLSurface surface, EGLint attribute
             }
         }
         return true;
-        break;
+    case EGL_TIMESTAMPS_ANDROID:
+        ALOGD("%s: set frame timestamps collecting %d\n", __func__, value);
+        p_surface->setCollectingTimestamps(value);
+        return true;
     default:
         ALOGW("%s: attr=0x%x not implemented", __FUNCTION__, attribute);
         setErrorReturn(EGL_BAD_ATTRIBUTE, EGL_FALSE);
@@ -1464,6 +1495,10 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
     VALIDATE_SURFACE_RETURN(draw, EGL_FALSE);
     VALIDATE_SURFACE_RETURN(read, EGL_FALSE);
 
+    // Only place to initialize the TLS destructor; any
+    // thread can suddenly jump in any eglMakeCurrent
+    setTlsDestructor((tlsDtorCallback)s_eglReleaseThreadImpl);
+
     if ((read == EGL_NO_SURFACE && draw == EGL_NO_SURFACE) && (ctx != EGL_NO_CONTEXT))
         setErrorReturn(EGL_BAD_MATCH, EGL_FALSE);
     if ((read != EGL_NO_SURFACE || draw != EGL_NO_SURFACE) && (ctx == EGL_NO_CONTEXT))
@@ -1496,7 +1531,8 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
     }
 
     if (context && (context->flags & EGLContext_t::IS_CURRENT) && (context != tInfo->currentContext)) {
-        //context is current to another thread
+        // context is current to another thread
+        ALOGE("%s: error: EGL_BAD_ACCESS: context %p current to another thread!\n", __FUNCTION__, context);
         setErrorReturn(EGL_BAD_ACCESS, EGL_FALSE);
     }
 
@@ -1509,7 +1545,7 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
     //Now make the local bind
     if (context) {
 
-        ALOGD("%s: %p: ver %d %d", __FUNCTION__, context, context->majorVersion, context->minorVersion);
+        ALOGD("%s: %p: ver %d %d (tinfo %p)", __FUNCTION__, context, context->majorVersion, context->minorVersion, tInfo);
         // This is a nontrivial context.
         // The thread cannot be gralloc-only anymore.
         hostCon->setGrallocOnly(false);
@@ -1525,6 +1561,13 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
             ClientAPIExts::initClientFuncs(s_display.gles2_iface(), 1);
         }
         if (contextState->needsInitFromCaps()) {
+            // Need to set the version first if
+            // querying caps, or validation will trip incorrectly.
+            hostCon->gl2Encoder()->setVersion(
+                context->majorVersion,
+                context->minorVersion,
+                context->deviceMajorVersion,
+                context->deviceMinorVersion);
             // Get caps for indexed buffers from host.
             // Some need a current context.
             int max_transform_feedback_separate_attribs = 0;
@@ -1562,7 +1605,7 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
                     max_draw_buffers);
         }
 
-        // set the client state and share group
+        // update the client state, share group, and version
         if (context->majorVersion > 1) {
             hostCon->gl2Encoder()->setClientStateMakeCurrent(
                     contextState,
