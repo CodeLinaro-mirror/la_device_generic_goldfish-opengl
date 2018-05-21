@@ -421,12 +421,15 @@ static void updateHostColorBuffer(cb_handle_t* cb,
 #ifndef GL_RGBA16F
 #define GL_RGBA16F                        0x881A
 #endif // GL_RGBA16F
-#ifndef GL_UNSIGNED_INT_10_10_10_2
-#define GL_UNSIGNED_INT_10_10_10_2        0x8DF6
-#endif // GL_UNSIGNED_INT_10_10_10_2
 #ifndef GL_HALF_FLOAT
 #define GL_HALF_FLOAT                     0x140B
 #endif // GL_HALF_FLOAT
+#ifndef GL_RGB10_A2
+#define GL_RGB10_A2                       0x8059
+#endif // GL_RGB10_A2
+#ifndef GL_UNSIGNED_INT_2_10_10_10_REV
+#define GL_UNSIGNED_INT_2_10_10_10_REV    0x8368
+#endif // GL_UNSIGNED_INT_2_10_10_10_REV
 //
 // gralloc device functions (alloc interface)
 //
@@ -537,8 +540,8 @@ static int gralloc_alloc(alloc_device_t* dev,
             break;
         case HAL_PIXEL_FORMAT_RGBA_1010102:
             bpp = 4;
-            glFormat = GL_RGBA;
-            glType = GL_UNSIGNED_INT_10_10_10_2;
+            glFormat = GL_RGB10_A2;
+            glType = GL_UNSIGNED_INT_2_10_10_10_REV;
             break;
 #endif // PLATFORM_SDK_VERSION >= 26
 #if PLATFORM_SDK_VERSION >= 21
@@ -712,10 +715,19 @@ static int gralloc_alloc(alloc_device_t* dev,
 
     if (needHostCb) {
         if (hostCon && rcEnc) {
+            GLenum allocFormat = glFormat;
+            // The handling of RGBX_8888 is very subtle. Most of the time
+            // we want it to be treated as RGBA_8888, with the exception
+            // that alpha is always ignored and treated as 1. The solution
+            // is to create 3 channel RGB texture instead and host GL will
+            // handle the Alpha channel.
+            if (HAL_PIXEL_FORMAT_RGBX_8888 == format) {
+                allocFormat = GL_RGB;
+            }
             if (s_grdma) {
-                cb->hostHandle = rcEnc->rcCreateColorBufferDMA(rcEnc, w, h, glFormat, cb->emuFrameworkFormat);
+                cb->hostHandle = rcEnc->rcCreateColorBufferDMA(rcEnc, w, h, allocFormat, cb->emuFrameworkFormat);
             } else {
-                cb->hostHandle = rcEnc->rcCreateColorBuffer(rcEnc, w, h, glFormat);
+                cb->hostHandle = rcEnc->rcCreateColorBuffer(rcEnc, w, h, allocFormat);
             }
             D("Created host ColorBuffer 0x%x\n", cb->hostHandle);
         }
