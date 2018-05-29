@@ -1469,16 +1469,6 @@ EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_c
                 RETURN_ERROR(EGL_NO_CONTEXT,EGL_BAD_ATTRIBUTE);
             }
             break;
-        case EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_KHR:
-            switch (attrib_val) {
-            case EGL_NO_RESET_NOTIFICATION_KHR:
-            case EGL_LOSE_CONTEXT_ON_RESET_KHR:
-                break;
-            default:
-                RETURN_ERROR(EGL_NO_CONTEXT,EGL_BAD_ATTRIBUTE);
-            }
-            reset_notification_strategy = attrib_val;
-            break;
         case EGL_CONTEXT_PRIORITY_LEVEL_IMG:
             // According to the spec, we are allowed not to honor this hint.
             // https://www.khronos.org/registry/EGL/extensions/IMG/EGL_IMG_context_priority.txt
@@ -1969,6 +1959,8 @@ EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx, EGLenum target, EG
             case HAL_PIXEL_FORMAT_RGB_565:
             case HAL_PIXEL_FORMAT_YV12:
             case HAL_PIXEL_FORMAT_BGRA_8888:
+            case HAL_PIXEL_FORMAT_RGBA_FP16:
+            case HAL_PIXEL_FORMAT_RGBA_1010102:
                 break;
             default:
                 setErrorReturn(EGL_BAD_PARAMETER, EGL_NO_IMAGE_KHR);
