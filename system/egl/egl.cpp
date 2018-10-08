@@ -23,13 +23,13 @@
 #include <cutils/log.h>
 #include <cutils/properties.h>
 #include "goldfish_sync.h"
-#include "gralloc_cb.h"
 #include "GLClientState.h"
 #include "GLSharedGroup.h"
 #include "eglContext.h"
 #include "ClientAPIExts.h"
 #include "EGLImage.h"
 #include "ProcessPipe.h"
+#include "qemu_pipe.h"
 
 #include "GLEncoder.h"
 #ifdef WITH_GLES2
@@ -96,12 +96,12 @@ const char *  eglStrError(EGLint err)
 
 #define setErrorReturn(error, retVal)     \
     {                                                \
-        ALOGE("tid %d: %s(%d): error 0x%x (%s)", gettid(), __FUNCTION__, __LINE__, error, eglStrError(error));     \
+        ALOGE("tid %d: %s(%d): error 0x%x (%s)", getCurrentThreadId(), __FUNCTION__, __LINE__, error, eglStrError(error));     \
         return setErrorFunc(error, retVal);            \
     }
 
 #define RETURN_ERROR(ret,err)           \
-    ALOGE("tid %d: %s(%d): error 0x%x (%s)", gettid(), __FUNCTION__, __LINE__, err, eglStrError(err));    \
+    ALOGE("tid %d: %s(%d): error 0x%x (%s)", getCurrentThreadId(), __FUNCTION__, __LINE__, err, eglStrError(err));    \
     getEGLThreadInfo()->eglError = err;    \
     return ret;
 
@@ -145,6 +145,11 @@ const char *  eglStrError(EGLint err)
     if (!rcEnc) { \
         ALOGE("egl: Failed to get renderControl encoder context\n"); \
         return ret; \
+    } \
+    Gralloc *grallocHelper = hostCon->grallocHelper(); \
+    if (!grallocHelper) { \
+        ALOGE("egl: Failed to get grallocHelper\n"); \
+        return ret; \
     }
 
 #define DEFINE_AND_VALIDATE_HOST_CONNECTION_FOR_TLS(ret, tls) \
@@ -156,6 +161,11 @@ const char *  eglStrError(EGLint err)
     ExtendedRCEncoderContext *rcEnc = hostCon->rcEncoder(); \
     if (!rcEnc) { \
         ALOGE("egl: Failed to get renderControl encoder context\n"); \
+        return ret; \
+    } \
+    Gralloc const* grallocHelper = hostCon->grallocHelper(); \
+    if (!grallocHelper) { \
+        ALOGE("egl: Failed to get grallocHelper\n"); \
         return ret; \
     }
 
@@ -396,12 +406,13 @@ EGLBoolean egl_window_surface_t::init()
     DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_FALSE);
     rcSurface = rcEnc->rcCreateWindowSurface(rcEnc, (uintptr_t)config,
             getWidth(), getHeight());
+
     if (!rcSurface) {
         ALOGE("rcCreateWindowSurface returned 0");
         return EGL_FALSE;
     }
     rcEnc->rcSetWindowColorBuffer(rcEnc, rcSurface,
-            ((cb_handle_t*)(buffer->handle))->hostHandle);
+            grallocHelper->getHostHandle(buffer->handle));
 
     return EGL_TRUE;
 }
@@ -424,6 +435,7 @@ egl_window_surface_t::~egl_window_surface_t() {
     if (rcSurface && rcEnc) {
         rcEnc->rcDestroyWindowSurface(rcEnc, rcSurface);
     }
+
     if (buffer) {
         nativeWindow->cancelBuffer_DEPRECATED(nativeWindow, buffer);
     }
@@ -467,6 +479,8 @@ static uint64_t createNativeSync(EGLenum type,
                     sync_handle,
                     thread_handle,
                     fd_out);
+
+        (void)queue_work_err;
 
         DPRINT("got native fence fd=%d queue_work_err=%d",
                *fd_out, queue_work_err);
@@ -560,7 +574,7 @@ EGLBoolean egl_window_surface_t::swapBuffers()
 #endif
 
     rcEnc->rcSetWindowColorBuffer(rcEnc, rcSurface,
-            ((cb_handle_t *)(buffer->handle))->hostHandle);
+            grallocHelper->getHostHandle(buffer->handle));
 
     setWidth(buffer->width);
     setHeight(buffer->height);
@@ -588,12 +602,13 @@ private:
     EGLBoolean init(GLenum format);
 
     uint32_t rcColorBuffer;
+    QEMU_PIPE_HANDLE refcountPipeFd;
 };
 
 egl_pbuffer_surface_t::egl_pbuffer_surface_t(EGLDisplay dpy, EGLConfig config,
         EGLint surfType, int32_t w, int32_t h)
 :   egl_surface_t(dpy, config, surfType),
-    rcColorBuffer(0)
+    rcColorBuffer(0), refcountPipeFd(QEMU_PIPE_INVALID_HANDLE)
 {
     setWidth(w);
     setHeight(h);
@@ -603,7 +618,13 @@ egl_pbuffer_surface_t::~egl_pbuffer_surface_t()
 {
     DEFINE_HOST_CONNECTION;
     if (rcEnc) {
-        if (rcColorBuffer) rcEnc->rcCloseColorBuffer(rcEnc, rcColorBuffer);
+        if (rcColorBuffer){
+            if(qemu_pipe_valid(refcountPipeFd)) {
+                qemu_pipe_close(refcountPipeFd);
+            } else {
+                rcEnc->rcCloseColorBuffer(rcEnc, rcColorBuffer);
+            }
+        }
         if (rcSurface)     rcEnc->rcDestroyWindowSurface(rcEnc, rcSurface);
     }
 }
@@ -654,6 +675,12 @@ EGLBoolean egl_pbuffer_surface_t::init(GLenum pixelFormat)
     if (!rcColorBuffer) {
         ALOGE("rcCreateColorBuffer returned 0");
         return EGL_FALSE;
+    } else {
+        refcountPipeFd = qemu_pipe_open("refcount");
+        //Send color buffer handle in case RefCountPipe feature is turned on.
+        if (qemu_pipe_valid(refcountPipeFd)) {
+            qemu_pipe_write(refcountPipeFd, &rcColorBuffer, 4);
+        }
     }
 
     rcEnc->rcSetWindowColorBuffer(rcEnc, rcSurface, rcColorBuffer);
@@ -1277,7 +1304,10 @@ static EGLBoolean s_eglReleaseThreadImpl(EGLThreadInfo* tInfo) {
     tInfo->eglError = EGL_SUCCESS;
     EGLContext_t* context = tInfo->currentContext;
 
-    if (!context || !s_display.isContext(context)) return EGL_TRUE;
+    if (!context || !s_display.isContext(context)) {
+        HostConnection::exit();
+        return EGL_TRUE;
+    }
 
     // The following code is doing pretty much the same thing as
     // eglMakeCurrent(&s_display, EGL_NO_CONTEXT, EGL_NO_SURFACE, EGL_NO_SURFACE)
@@ -1298,6 +1328,8 @@ static EGLBoolean s_eglReleaseThreadImpl(EGLThreadInfo* tInfo) {
         delete context;
     }
     tInfo->currentContext = 0;
+
+    HostConnection::exit();
 
     return EGL_TRUE;
 }
@@ -1951,9 +1983,9 @@ EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx, EGLenum target, EG
         if (native_buffer->common.version != sizeof(android_native_buffer_t))
             setErrorReturn(EGL_BAD_PARAMETER, EGL_NO_IMAGE_KHR);
 
-        cb_handle_t *cb = (cb_handle_t *)(native_buffer->handle);
-
-        switch (cb->format) {
+        DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_FALSE);
+        int format = grallocHelper->getFormat(native_buffer->handle);
+        switch (format) {
             case HAL_PIXEL_FORMAT_RGBA_8888:
             case HAL_PIXEL_FORMAT_RGBX_8888:
             case HAL_PIXEL_FORMAT_RGB_888:
