@@ -3,6 +3,10 @@ LOCAL_PATH := $(call my-dir)
 $(call emugl-begin-shared-library,libOpenglSystemCommon)
 $(call emugl-import,libGLESv1_enc libGLESv2_enc lib_renderControl_enc)
 
+ifeq (true,$(BUILD_EMULATOR_VULKAN))
+$(call emugl-import,libvulkan_enc)
+endif
+
 LOCAL_SRC_FILES := \
     FormatConversions.cpp \
     HostConnection.cpp \
@@ -15,6 +19,12 @@ LOCAL_SRC_FILES += \
     ThreadInfo_host.cpp \
 
 else
+
+ifeq (true,$(BUILD_EMULATOR_VULKAN))
+
+LOCAL_HEADER_LIBRARIES += vulkan_headers
+
+endif
 
 LOCAL_SRC_FILES += \
     ThreadInfo.cpp \
