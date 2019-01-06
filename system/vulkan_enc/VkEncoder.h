@@ -27,11 +27,12 @@
 #include <vulkan/vulkan.h>
 
 
+#include "goldfish_vk_private_defs.h"
 #include <memory>
 class IOStream;
 
 
-
+namespace goldfish_vk {
 
 
 class VkEncoder {
@@ -1304,6 +1305,25 @@ public:
 #endif
 #ifdef VK_KHR_8bit_storage
 #endif
+#ifdef VK_ANDROID_native_buffer
+    VkResult vkGetSwapchainGrallocUsageANDROID(
+    VkDevice device,
+        VkFormat format,
+        VkImageUsageFlags imageUsage,
+        int* grallocUsage);
+    VkResult vkAcquireImageANDROID(
+    VkDevice device,
+        VkImage image,
+        int nativeFenceFd,
+        VkSemaphore semaphore,
+        VkFence fence);
+    VkResult vkQueueSignalReleaseImageANDROID(
+    VkQueue queue,
+        uint32_t waitSemaphoreCount,
+        const VkSemaphore* pWaitSemaphores,
+        VkImage image,
+        int* pNativeFenceFd);
+#endif
 #ifdef VK_EXT_debug_report
     VkResult vkCreateDebugReportCallbackEXT(
     VkInstance instance,
@@ -1727,4 +1747,4 @@ private:
     std::unique_ptr<Impl> mImpl;
 };
 
-
+} // namespace goldfish_vk
