@@ -76,6 +76,7 @@ GL2Encoder::GL2Encoder(IOStream *stream, ChecksumCalculator *protocol)
     m_noHostError = false;
     m_state = NULL;
     m_error = GL_NO_ERROR;
+
     m_num_compressedTextureFormats = 0;
     m_max_combinedTextureImageUnits = 0;
     m_max_vertexTextureImageUnits = 0;
@@ -362,6 +363,11 @@ GL2Encoder::GL2Encoder(IOStream *stream, ChecksumCalculator *protocol)
     OVERRIDE_CUSTOM(glDrawElementsIndirect);
 
     OVERRIDE(glTexStorage2DMultisample);
+
+    OVERRIDE_CUSTOM(glGetGraphicsResetStatusEXT);
+    OVERRIDE_CUSTOM(glReadnPixelsEXT);
+    OVERRIDE_CUSTOM(glGetnUniformfvEXT);
+    OVERRIDE_CUSTOM(glGetnUniformivEXT);
 }
 
 GL2Encoder::~GL2Encoder()
@@ -852,6 +858,10 @@ void GL2Encoder::s_glGetIntegerv(void *self, GLenum param, GLint *ptr)
             ctx->m_max_vertexAttribBindings = *ptr;
         }
         break;
+    case GL_RESET_NOTIFICATION_STRATEGY_EXT:
+        // BUG: 121414786
+        *ptr = GL_LOSE_CONTEXT_ON_RESET_EXT;
+        break;
     default:
         SET_ERROR_IF(!state, GL_INVALID_OPERATION);
         if (!state->getClientStateParameter<GLint>(param, ptr)) {
@@ -1208,7 +1218,7 @@ void GL2Encoder::sendVertexAttributes(GLint first, GLsizei count, bool hasClient
 
             if (bufferObject == 0) {
                 unsigned int datalen = state.elementSize * count;
-                if (divisor && primcount) {
+                if (divisor) {
                     ALOGV("%s: divisor for att %d: %d, w/ stride %d (effective stride %d) size %d type 0x%x) datalen %u",
                             __FUNCTION__, i, divisor, state.stride, effectiveStride, state.elementSize, state.type, datalen);
                     int actual_count = std::max(1, (int)((primcount + divisor - 1) / divisor));
@@ -1238,7 +1248,7 @@ void GL2Encoder::sendVertexAttributes(GLint first, GLsizei count, bool hasClient
                 // But the last element doesn't have to fill up the whole stride.
                 // So it becomes the current form.
                 unsigned int bufLen = effectiveStride * (count ? (count - 1) : 0) + state.elementSize;
-                if (divisor && primcount) {
+                if (divisor) {
                     int actual_count = std::max(1, (int)((primcount + divisor - 1) / divisor));
                     bufLen = effectiveStride * (actual_count ? (actual_count - 1) : 0) + state.elementSize;
                 }
@@ -2898,6 +2908,42 @@ void* GL2Encoder::s_glMapBufferRange(void* self, GLenum target, GLintptr offset,
                 buf->m_guest_paddr);
 
         return reinterpret_cast<void*>(buf->dma_buffer.get().mapped_addr);
+    } else if (ctx->hasExtension("ANDROID_EMU_direct_mem")) {
+        GoldfishAddressSpaceBlock new_shared_block;
+
+        if (new_shared_block.allocate(&ctx->m_goldfish_address_block_provider, length)) {
+            uint64_t gpu_addr =
+                ctx->glMapBufferRangeDirect(ctx,
+                                            target,
+                                            offset,
+                                            length,
+                                            access,
+                                            new_shared_block.physAddr());
+            if (gpu_addr) {
+                void *user_ptr = new_shared_block.mmap(gpu_addr);
+                if (user_ptr) {
+                    buf->shared_block.replace(&new_shared_block);
+                    return user_ptr;
+                } else {
+                    GLboolean host_res = GL_TRUE;
+
+                    ctx->glUnmapBufferDirect(
+                        ctx, target,
+                        offset,
+                        length,
+                        access,
+                        new_shared_block.physAddr(),
+                        gpu_addr,
+                        &host_res);
+
+                    return s_glMapBufferRangeAEMUImpl(ctx, target, offset, length, access, buf);
+                }
+            } else {
+                return s_glMapBufferRangeAEMUImpl(ctx, target, offset, length, access, buf);
+            }
+        } else {
+            return s_glMapBufferRangeAEMUImpl(ctx, target, offset, length, access, buf);
+        }
     } else {
         return s_glMapBufferRangeAEMUImpl(ctx, target, offset, length, access, buf);
     }
@@ -2934,12 +2980,29 @@ GLboolean GL2Encoder::s_glUnmapBuffer(void* self, GLenum target) {
                buf->m_mappedLength);
 
         ctx->glUnmapBufferDMA(
+            ctx, target,
+            buf->m_mappedOffset,
+            buf->m_mappedLength,
+            buf->m_mappedAccess,
+            goldfish_dma_guest_paddr(&buf->dma_buffer.get()),
+            &host_res);
+    } else if (buf->shared_block.guestPtr()) {
+        GoldfishAddressSpaceBlock *shared_block = &buf->shared_block;
+
+        memcpy(static_cast<char*>(buf->m_fixedBuffer.ptr()) + buf->m_mappedOffset,
+               shared_block->guestPtr(),
+               buf->m_mappedLength);
+
+        ctx->glUnmapBufferDirect(
                 ctx, target,
                 buf->m_mappedOffset,
                 buf->m_mappedLength,
                 buf->m_mappedAccess,
-                goldfish_dma_guest_paddr(&buf->dma_buffer.get()),
+                shared_block->physAddr(),
+                shared_block->hostAddr(),
                 &host_res);
+
+        shared_block->replace(NULL);
     } else {
         ctx->glUnmapBufferAEMU(
                 ctx, target,
@@ -2980,12 +3043,20 @@ void GL2Encoder::s_glFlushMappedBufferRange(void* self, GLenum target, GLintptr 
 
     buf->m_indexRangeCache.invalidateRange(totalOffset, length);
 
-    ctx->glFlushMappedBufferRangeAEMU(
-            ctx, target,
-            totalOffset,
-            length,
-            buf->m_mappedAccess,
-            (void*)((char*)buf->m_fixedBuffer.ptr() + totalOffset));
+    if (buf->shared_block.guestPtr()) {
+        ctx->glFlushMappedBufferRangeDirect(
+                ctx, target,
+                totalOffset,
+                length,
+                buf->m_mappedAccess);
+    } else {
+        ctx->glFlushMappedBufferRangeAEMU(
+                ctx, target,
+                totalOffset,
+                length,
+                buf->m_mappedAccess,
+                (void*)((char*)buf->m_fixedBuffer.ptr() + totalOffset));
+    }
 }
 
 void GL2Encoder::s_glCompressedTexImage2D(void* self, GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid* data) {
@@ -5258,3 +5329,32 @@ void GL2Encoder::s_glTexStorage2DMultisample(void* self, GLenum target, GLsizei 
     ctx->m_glTexStorage2DMultisample_enc(ctx, target, samples, internalformat, width, height, fixedsamplelocations);
 }
 
+GLenum GL2Encoder::s_glGetGraphicsResetStatusEXT(void* self) {
+    (void)self;
+    return GL_NO_ERROR;
+}
+
+void GL2Encoder::s_glReadnPixelsEXT(void* self, GLint x, GLint y, GLsizei width,
+        GLsizei height, GLenum format, GLenum type, GLsizei bufSize,
+        GLvoid* pixels) {
+    GL2Encoder *ctx = (GL2Encoder*)self;
+    SET_ERROR_IF(bufSize < glesv2_enc::pixelDataSize(self, width, height, format,
+        type, 1), GL_INVALID_OPERATION);
+    s_glReadPixels(self, x, y, width, height, format, type, pixels);
+}
+
+void GL2Encoder::s_glGetnUniformfvEXT(void *self, GLuint program, GLint location,
+        GLsizei bufSize, GLfloat* params) {
+    GL2Encoder *ctx = (GL2Encoder*)self;
+    SET_ERROR_IF(bufSize < glSizeof(glesv2_enc::uniformType(self, program,
+        location)), GL_INVALID_OPERATION);
+    s_glGetUniformfv(self, program, location, params);
+}
+
+void GL2Encoder::s_glGetnUniformivEXT(void *self, GLuint program, GLint location,
+        GLsizei bufSize, GLint* params) {
+    GL2Encoder *ctx = (GL2Encoder*)self;
+    SET_ERROR_IF(bufSize < glSizeof(glesv2_enc::uniformType(self, program,
+        location)), GL_INVALID_OPERATION);
+    s_glGetUniformiv(self, program, location, params);
+}

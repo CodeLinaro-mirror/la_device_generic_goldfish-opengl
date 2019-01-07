@@ -35,23 +35,25 @@ endif
 LOCAL_CFLAGS += \
     -DLOG_TAG=\"goldfish_vulkan\" \
     -DVK_ANDROID_native_buffer \
+    -DVK_GOOGLE_address_space \
     -Wno-missing-field-initializers \
     -Werror \
     -fstrict-aliasing \
     -DVK_USE_PLATFORM_ANDROID_KHR \
     -DVK_NO_PROTOTYPES \
 
-LOCAL_SRC_FILES := Resources.cpp \
+LOCAL_SRC_FILES := HostVisibleMemoryVirtualization.cpp \
+    Resources.cpp \
     Validation.cpp \
     VulkanStream.cpp \
     VulkanHandleMapping.cpp \
     ResourceTracker.cpp \
     VkEncoder.cpp \
-VkEventHandler.cpp \
 goldfish_vk_extension_structs_guest.cpp \
 goldfish_vk_marshaling_guest.cpp \
 goldfish_vk_deepcopy_guest.cpp \
 goldfish_vk_handlemap_guest.cpp \
+goldfish_vk_transform.cpp \
 
 
 ifeq (true,$(GOLDFISH_OPENGL_BUILD_FOR_HOST))

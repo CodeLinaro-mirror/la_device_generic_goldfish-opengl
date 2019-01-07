@@ -12,20 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "Resources.h"
-#include "ResourceTracker.h"
-#include "VkEncoder.h"
-
-#include "gralloc_cb.h"
-#include "goldfish_vk_private_defs.h"
-
-#include "android/base/AlignedBuf.h"
 
 #include <log/log.h>
 #include <stdlib.h>
-#include <sync/sync.h>
-
-using android::aligned_buf_alloc;
-using android::aligned_buf_free;
 
 #define GOLDFISH_VK_OBJECT_DEBUG 0
 
@@ -36,9 +25,6 @@ using android::aligned_buf_free;
 #define D(fmt,...)
 #endif
 #endif
-
-using goldfish_vk::ResourceTracker;
-using goldfish_vk::VkEncoder;
 
 extern "C" {
 
@@ -51,7 +37,7 @@ extern "C" {
             abort(); \
         } \
         res->dispatch.magic = HWVULKAN_DISPATCH_MAGIC; \
-        res->underlying = (uint64_t)(uintptr_t)underlying; \
+        res->underlying = (uint64_t)underlying; \
         return reinterpret_cast<type>(res); \
     } \
 
@@ -59,7 +45,7 @@ extern "C" {
     type new_from_host_##type(type underlying) { \
         struct goldfish_##type* res = \
             static_cast<goldfish_##type*>(malloc(sizeof(goldfish_##type))); \
-        res->underlying = (uint64_t)(uintptr_t)underlying; \
+        res->underlying = (uint64_t)underlying; \
         return reinterpret_cast<type>(res); \
     } \
 
@@ -72,7 +58,7 @@ extern "C" {
     type get_host_##type(type toUnwrap) { \
         if (!toUnwrap) return VK_NULL_HANDLE; \
         auto as_goldfish = as_goldfish_##type(toUnwrap); \
-        return (type)(uintptr_t)(as_goldfish->underlying); \
+        return (type)(as_goldfish->underlying); \
     } \
 
 #define GOLDFISH_VK_DELETE_GOLDFISH_IMPL(type) \
@@ -116,7 +102,6 @@ extern "C" {
         return as_goldfish->underlying; \
     } \
 
-
 GOLDFISH_VK_LIST_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_NEW_DISPATCHABLE_FROM_HOST_IMPL)
 GOLDFISH_VK_LIST_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_AS_GOLDFISH_IMPL)
 GOLDFISH_VK_LIST_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_GET_HOST_IMPL)
@@ -129,210 +114,8 @@ GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_AS_GOLDFISH_IMPL)
 GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_GET_HOST_IMPL)
 GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_IDENTITY_IMPL)
 GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_GET_HOST_U64_IMPL)
-
-GOLDFISH_VK_LIST_TRIVIAL_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_NEW_TRIVIAL_NON_DISPATCHABLE_FROM_HOST_IMPL)
-GOLDFISH_VK_LIST_TRIVIAL_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_NEW_TRIVIAL_NON_DISPATCHABLE_FROM_HOST_U64_IMPL)
-GOLDFISH_VK_LIST_TRIVIAL_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_DELETE_GOLDFISH_IMPL)
-
-// Custom definitions///////////////////////////////////////////////////////////
-
-VkResult goldfish_vkEnumerateInstanceVersion(
-    void*,
-    VkResult,
-    uint32_t* apiVersion) {
-    if (apiVersion) {
-        *apiVersion = VK_MAKE_VERSION(1, 0, 0);
-    }
-    return VK_SUCCESS;
-}
-
-VkResult goldfish_vkEnumerateDeviceExtensionProperties(
-    void*,
-    VkResult,
-    VkPhysicalDevice, const char*,
-    uint32_t *pPropertyCount, VkExtensionProperties *) {
-    *pPropertyCount = 0;
-    return VK_SUCCESS;
-}
-
-void goldfish_vkGetPhysicalDeviceProperties2(
-    void*,
-    VkPhysicalDevice,
-    VkPhysicalDeviceProperties2*)
-{
-    // no-op
-}
-
-VkResult goldfish_vkCreateDevice(
-    void* opaque,
-    VkResult host_return,
-    VkPhysicalDevice physicalDevice,
-    const VkDeviceCreateInfo*,
-    const VkAllocationCallbacks*,
-    VkDevice* pDevice) {
-
-    if (host_return != VK_SUCCESS) return host_return;
-
-    VkEncoder* enc = (VkEncoder*)opaque;
-
-    VkPhysicalDeviceProperties props;
-    VkPhysicalDeviceMemoryProperties memProps;
-    enc->vkGetPhysicalDeviceProperties(physicalDevice, &props);
-    enc->vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
-
-    ResourceTracker::get()->setDeviceInfo(*pDevice, physicalDevice, props, memProps);
-
-    return host_return;
-}
-
-VkDeviceMemory new_from_host_VkDeviceMemory(VkDeviceMemory mem) {
-    struct goldfish_VkDeviceMemory *res =
-        (struct goldfish_VkDeviceMemory *)malloc(sizeof(goldfish_VkDeviceMemory));
-
-    if (!res) {
-        ALOGE("FATAL: Failed to alloc VkDeviceMemory handle");
-        abort();
-    }
-
-    memset(res, 0x0, sizeof(goldfish_VkDeviceMemory));
-
-    res->underlying = (uint64_t)(uintptr_t)mem;
-
-    return reinterpret_cast<VkDeviceMemory>(res);
-}
-
-VkDeviceMemory new_from_host_u64_VkDeviceMemory(uint64_t mem) {
-    struct goldfish_VkDeviceMemory *res =
-        (struct goldfish_VkDeviceMemory *)malloc(sizeof(goldfish_VkDeviceMemory));
-
-    if (!res) {
-        ALOGE("FATAL: Failed to alloc VkDeviceMemory handle");
-        abort();
-    }
-
-    memset(res, 0x0, sizeof(goldfish_VkDeviceMemory));
-
-    res->underlying = mem;
-
-    return reinterpret_cast<VkDeviceMemory>(res);
-}
-
-void delete_goldfish_VkDeviceMemory(VkDeviceMemory mem) {
-    struct goldfish_VkDeviceMemory* goldfish_mem =
-        as_goldfish_VkDeviceMemory(mem);
-
-    if (!goldfish_mem) return;
-
-    if (goldfish_mem->ptr) {
-        // TODO: unmap the pointer with address space device
-        aligned_buf_free(goldfish_mem->ptr);
-    }
-
-    free(goldfish_mem);
-}
-
-VkResult goldfish_vkAllocateMemory(
-    void*,
-    VkResult host_return,
-    VkDevice device,
-    const VkMemoryAllocateInfo* pAllocateInfo,
-    const VkAllocationCallbacks*,
-    VkDeviceMemory* pMemory) {
-    
-    if (host_return != VK_SUCCESS) return host_return;
-
-    // Assumes pMemory has already been allocated.
-    goldfish_VkDeviceMemory* mem = as_goldfish_VkDeviceMemory(*pMemory);
-    VkDeviceSize size = pAllocateInfo->allocationSize;
-
-    // assume memory is not host visible.
-    mem->ptr = nullptr;
-    mem->size = size;
-    mem->mappedSize = ResourceTracker::get()->getNonCoherentExtendedSize(device, size);
-
-    if (!ResourceTracker::get()->isMemoryTypeHostVisible(device, pAllocateInfo->memoryTypeIndex)) {
-        return host_return;
-    }
-
-    // This is a strict alignment; we do not expect any
-    // actual device to have more stringent requirements
-    // than this.
-    mem->ptr = (uint8_t*)aligned_buf_alloc(4096, mem->mappedSize);
-    D("host visible alloc: size 0x%llx host ptr %p mapped size 0x%llx",
-      (unsigned long long)size, mem->ptr,
-      (unsigned long long)mem->mappedSize);
-
-    return host_return;
-}
-
-VkResult goldfish_vkMapMemory(
-    void*,
-    VkResult host_result,
-    VkDevice,
-    VkDeviceMemory memory,
-    VkDeviceSize offset,
-    VkDeviceSize size,
-    VkMemoryMapFlags,
-    void** ppData) {
-    
-    if (host_result != VK_SUCCESS) return host_result;
-
-    goldfish_VkDeviceMemory* mem = as_goldfish_VkDeviceMemory(memory);
-
-    if (!mem->ptr) {
-        return VK_ERROR_MEMORY_MAP_FAILED;
-    }
-
-    if (size != VK_WHOLE_SIZE &&
-        (mem->ptr + offset + size > mem->ptr + mem->size)) {
-        return VK_ERROR_MEMORY_MAP_FAILED;
-    }
-
-    *ppData = mem->ptr + offset;
-
-    return host_result;
-}
-
-void goldfish_vkUnmapMemory(
-    void*,
-    VkDevice,
-    VkDeviceMemory) {
-    // no-op
-}
-
-void goldfish_unwrap_VkNativeBufferANDROID(
-    const VkImageCreateInfo* pCreateInfo,
-    VkImageCreateInfo* local_pCreateInfo) {
-
-    if (!pCreateInfo->pNext) return;
-
-    const VkNativeBufferANDROID* nativeInfo =
-        reinterpret_cast<const VkNativeBufferANDROID*>(pCreateInfo->pNext);
-
-    if (VK_STRUCTURE_TYPE_NATIVE_BUFFER_ANDROID != nativeInfo->sType) {
-        return;
-    }
-
-    const cb_handle_t* cb_handle =
-        reinterpret_cast<const cb_handle_t*>(nativeInfo->handle);
-
-    if (!cb_handle) return;
-
-    VkNativeBufferANDROID* nativeInfoOut =
-        reinterpret_cast<VkNativeBufferANDROID*>(local_pCreateInfo);
-
-    if (!nativeInfoOut->handle) {
-        ALOGE("FATAL: Local native buffer info not properly allocated!");
-        abort();
-    }
-
-    *(uint32_t*)(nativeInfoOut->handle) = cb_handle->hostHandle;
-}
-
-void goldfish_unwrap_vkAcquireImageANDROID_nativeFenceFd(int fd, int*) {
-    if (fd != -1) {
-        sync_wait(fd, 3000);
-    }
-}
+GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_NEW_TRIVIAL_NON_DISPATCHABLE_FROM_HOST_IMPL)
+GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_NEW_TRIVIAL_NON_DISPATCHABLE_FROM_HOST_U64_IMPL)
+GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_DELETE_GOLDFISH_IMPL)
 
 } // extern "C"
