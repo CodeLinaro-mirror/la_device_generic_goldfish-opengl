@@ -17,6 +17,16 @@
 
 #include "GLEncoder.h"
 #include "GL2Encoder.h"
+
+#ifdef GOLDFISH_VULKAN
+#include "VkEncoder.h"
+#else
+struct VkEncoder {
+    VkEncoder(IOStream*) { }
+    int placeholder;
+};
+#endif
+
 #include "ProcessPipe.h"
 #include "QemuPipeStream.h"
 #include "TcpStream.h"
@@ -69,6 +79,7 @@ HostConnection::HostConnection() :
     m_stream(NULL),
     m_glEnc(NULL),
     m_gl2Enc(NULL),
+    m_vkEnc(NULL),
     m_rcEnc(NULL),
     m_checksumHelper(),
     m_glExtensions(),
@@ -217,6 +228,14 @@ GL2Encoder *HostConnection::gl2Encoder()
     return m_gl2Enc;
 }
 
+VkEncoder *HostConnection::vkEncoder()
+{
+    if (!m_vkEnc) {
+        m_vkEnc = new VkEncoder(m_stream);
+    }
+    return m_vkEnc;
+}
+
 ExtendedRCEncoderContext *HostConnection::rcEncoder()
 {
     if (!m_rcEnc) {
@@ -226,6 +245,7 @@ ExtendedRCEncoderContext *HostConnection::rcEncoder()
         queryAndSetDmaImpl(m_rcEnc);
         queryAndSetGLESMaxVersion(m_rcEnc);
         queryAndSetNoErrorState(m_rcEnc);
+        queryAndSetHostCompositionImpl(m_rcEnc);
         if (m_processPipe) {
             m_processPipe->processPipeInit(m_rcEnc);
         }
@@ -277,6 +297,17 @@ const std::string& HostConnection::queryGLExtensions(ExtendedRCEncoderContext *r
     }
 
     return m_glExtensions;
+}
+
+void HostConnection::queryAndSetHostCompositionImpl(ExtendedRCEncoderContext *rcEnc) {
+    const std::string& glExtensions = queryGLExtensions(rcEnc);
+    ALOGD("HostComposition ext %s", glExtensions.c_str());
+    if (glExtensions.find(kHostCompositionV1) != std::string::npos) {
+        rcEnc->setHostComposition(HOST_COMPOSITION_V1);
+    }
+    else {
+        rcEnc->setHostComposition(HOST_COMPOSITION_NONE);
+    }
 }
 
 void HostConnection::setChecksumHelper(ExtendedRCEncoderContext *rcEnc) {
