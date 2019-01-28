@@ -27,6 +27,9 @@
 
 #include "VkEncoder.h"
 #include "HostConnection.h"
+#include "ResourceTracker.h"
+
+#include "goldfish_vk_private_defs.h"
 
 // Stuff we are not going to use but if included,
 // will cause compile errors. These are Android Vulkan
@@ -237,7 +240,8 @@ static VkResult entry_vkAllocateMemory(
 {
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkAllocateMemory_VkResult_return = (VkResult)0;
-    vkAllocateMemory_VkResult_return = vkEnc->vkAllocateMemory(device, pAllocateInfo, pAllocator, pMemory);
+    auto resources = ResourceTracker::get();
+    vkAllocateMemory_VkResult_return = resources->on_vkAllocateMemory(vkEnc, VK_SUCCESS, device, pAllocateInfo, pAllocator, pMemory);
     return vkAllocateMemory_VkResult_return;
 }
 static void entry_vkFreeMemory(
@@ -246,7 +250,8 @@ static void entry_vkFreeMemory(
     const VkAllocationCallbacks* pAllocator)
 {
     auto vkEnc = HostConnection::get()->vkEncoder();
-    vkEnc->vkFreeMemory(device, memory, pAllocator);
+    auto resources = ResourceTracker::get();
+    resources->on_vkFreeMemory(vkEnc, device, memory, pAllocator);
 }
 static VkResult entry_vkMapMemory(
     VkDevice device,
@@ -2548,6 +2553,43 @@ static void entry_vkCmdDrawIndexedIndirectCountKHR(
 #endif
 #ifdef VK_KHR_8bit_storage
 #endif
+#ifdef VK_ANDROID_native_buffer
+static VkResult entry_vkGetSwapchainGrallocUsageANDROID(
+    VkDevice device,
+    VkFormat format,
+    VkImageUsageFlags imageUsage,
+    int* grallocUsage)
+{
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    VkResult vkGetSwapchainGrallocUsageANDROID_VkResult_return = (VkResult)0;
+    vkGetSwapchainGrallocUsageANDROID_VkResult_return = vkEnc->vkGetSwapchainGrallocUsageANDROID(device, format, imageUsage, grallocUsage);
+    return vkGetSwapchainGrallocUsageANDROID_VkResult_return;
+}
+static VkResult entry_vkAcquireImageANDROID(
+    VkDevice device,
+    VkImage image,
+    int nativeFenceFd,
+    VkSemaphore semaphore,
+    VkFence fence)
+{
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    VkResult vkAcquireImageANDROID_VkResult_return = (VkResult)0;
+    vkAcquireImageANDROID_VkResult_return = vkEnc->vkAcquireImageANDROID(device, image, nativeFenceFd, semaphore, fence);
+    return vkAcquireImageANDROID_VkResult_return;
+}
+static VkResult entry_vkQueueSignalReleaseImageANDROID(
+    VkQueue queue,
+    uint32_t waitSemaphoreCount,
+    const VkSemaphore* pWaitSemaphores,
+    VkImage image,
+    int* pNativeFenceFd)
+{
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    VkResult vkQueueSignalReleaseImageANDROID_VkResult_return = (VkResult)0;
+    vkQueueSignalReleaseImageANDROID_VkResult_return = vkEnc->vkQueueSignalReleaseImageANDROID(queue, waitSemaphoreCount, pWaitSemaphores, image, pNativeFenceFd);
+    return vkQueueSignalReleaseImageANDROID_VkResult_return;
+}
+#endif
 #ifdef VK_EXT_debug_report
 static VkResult entry_vkCreateDebugReportCallbackEXT(
     VkInstance instance,
@@ -3279,6 +3321,18 @@ static void entry_vkGetQueueCheckpointDataNV(
 {
     auto vkEnc = HostConnection::get()->vkEncoder();
     vkEnc->vkGetQueueCheckpointDataNV(queue, pCheckpointDataCount, pCheckpointData);
+}
+#endif
+#ifdef VK_GOOGLE_address_space
+static VkResult entry_vkMapMemoryIntoAddressSpaceGOOGLE(
+    VkDevice device,
+    VkDeviceMemory memory,
+    uint64_t* pAddress)
+{
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    VkResult vkMapMemoryIntoAddressSpaceGOOGLE_VkResult_return = (VkResult)0;
+    vkMapMemoryIntoAddressSpaceGOOGLE_VkResult_return = vkEnc->vkMapMemoryIntoAddressSpaceGOOGLE(device, memory, pAddress);
+    return vkMapMemoryIntoAddressSpaceGOOGLE_VkResult_return;
 }
 #endif
 void* goldfish_vulkan_get_proc_address(const char* name){
@@ -4358,6 +4412,20 @@ void* goldfish_vulkan_get_proc_address(const char* name){
         return (void*)entry_vkCmdDrawIndexedIndirectCountKHR;
     }
 #endif
+#ifdef VK_ANDROID_native_buffer
+    if (!strcmp(name, "vkGetSwapchainGrallocUsageANDROID"))
+    {
+        return (void*)entry_vkGetSwapchainGrallocUsageANDROID;
+    }
+    if (!strcmp(name, "vkAcquireImageANDROID"))
+    {
+        return (void*)entry_vkAcquireImageANDROID;
+    }
+    if (!strcmp(name, "vkQueueSignalReleaseImageANDROID"))
+    {
+        return (void*)entry_vkQueueSignalReleaseImageANDROID;
+    }
+#endif
 #ifdef VK_EXT_debug_report
     if (!strcmp(name, "vkCreateDebugReportCallbackEXT"))
     {
@@ -4660,6 +4728,12 @@ void* goldfish_vulkan_get_proc_address(const char* name){
     if (!strcmp(name, "vkGetQueueCheckpointDataNV"))
     {
         return (void*)entry_vkGetQueueCheckpointDataNV;
+    }
+#endif
+#ifdef VK_GOOGLE_address_space
+    if (!strcmp(name, "vkMapMemoryIntoAddressSpaceGOOGLE"))
+    {
+        return (void*)entry_vkMapMemoryIntoAddressSpaceGOOGLE;
     }
 #endif
     return nullptr;

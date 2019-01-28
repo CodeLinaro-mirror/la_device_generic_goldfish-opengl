@@ -29,6 +29,7 @@
 
 #include "vk_platform_compat.h"
 
+#include "goldfish_vk_private_defs.h"
 #include "android/base/Pool.h"
 using android::base::Pool;
 // Stuff we are not going to use but if included,
@@ -1355,6 +1356,13 @@ void deepcopy_VkPhysicalDevice8BitStorageFeaturesKHR(
     VkPhysicalDevice8BitStorageFeaturesKHR* to);
 
 #endif
+#ifdef VK_ANDROID_native_buffer
+void deepcopy_VkNativeBufferANDROID(
+    Pool* pool,
+    const VkNativeBufferANDROID* from,
+    VkNativeBufferANDROID* to);
+
+#endif
 #ifdef VK_EXT_debug_report
 void deepcopy_VkDebugReportCallbackCreateInfoEXT(
     Pool* pool,
@@ -1999,6 +2007,8 @@ void deepcopy_VkCheckpointDataNV(
     const VkCheckpointDataNV* from,
     VkCheckpointDataNV* to);
 
+#endif
+#ifdef VK_GOOGLE_address_space
 #endif
 
 } // namespace goldfish_vk

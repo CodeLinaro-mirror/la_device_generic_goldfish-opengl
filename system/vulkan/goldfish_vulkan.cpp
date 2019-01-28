@@ -60,11 +60,12 @@ int CloseDevice(struct hw_device_t* /*device*/) {
         ALOGE("vulkan: Failed to get renderControl encoder context\n"); \
         return VK_ERROR_DEVICE_LOST; \
     } \
-    VkEncoder *vkEnc = hostCon->vkEncoder(); \
+    goldfish_vk::VkEncoder *vkEnc = hostCon->vkEncoder(); \
     if (!vkEnc) { \
         ALOGE("vulkan: Failed to get Vulkan encoder\n"); \
         return VK_ERROR_DEVICE_LOST; \
     } \
+    goldfish_vk::ResourceTracker::get()->setupFeatures(rcEnc->featureInfo_const()); \
 
 VKAPI_ATTR
 VkResult EnumerateInstanceExtensionProperties(
