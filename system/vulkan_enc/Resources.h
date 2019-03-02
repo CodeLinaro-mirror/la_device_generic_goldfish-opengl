@@ -70,43 +70,6 @@ GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_DELETE_GOLDFISH_DECL)
 GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_IDENTITY_DECL)
 GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_NEW_FROM_HOST_U64_DECL)
 GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_GET_HOST_U64_DECL)
-
-GOLDFISH_VK_LIST_TRIVIAL_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_DEFINE_TRIVIAL_NON_DISPATCHABLE_HANDLE_STRUCT)
-
-// Custom definitions///////////////////////////////////////////////////////////
-
-VkResult goldfish_vkEnumerateInstanceVersion(uint32_t* apiVersion);
-
-VkResult goldfish_vkEnumerateDeviceExtensionProperties(
-    VkPhysicalDevice physicalDevice, const char *pLayerName,
-    uint32_t *pPropertyCount, VkExtensionProperties *pProperties);
-
-void goldfish_vkGetPhysicalDeviceProperties2(
-    VkPhysicalDevice physicalDevice,
-    VkPhysicalDeviceProperties2* pProperties);
-
-struct goldfish_VkDeviceMemory {
-    uint64_t underlying;
-    uint8_t* ptr;
-    VkDeviceSize size;
-};
-
-VkResult goldfish_vkAllocateMemory(
-    VkDevice device,
-    const VkMemoryAllocateInfo* pAllocateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkDeviceMemory* pMemory);
-
-VkResult goldfish_vkMapMemory(
-    VkDevice device,
-    VkDeviceMemory memory,
-    VkDeviceSize offset,
-    VkDeviceSize size,
-    VkMemoryMapFlags flags,
-    void** ppData);
-
-void goldfish_vkUnmapMemory(
-    VkDevice device,
-    VkDeviceMemory memory);
+GOLDFISH_VK_LIST_NON_DISPATCHABLE_HANDLE_TYPES(GOLDFISH_VK_DEFINE_TRIVIAL_NON_DISPATCHABLE_HANDLE_STRUCT)
 
 } // extern "C"

@@ -104,6 +104,8 @@ private:
     GLSharedGroupPtr m_shared;
     GLenum  m_error;
 
+    GoldfishAddressSpaceBlockProvider m_goldfish_address_block_provider;
+
     GLint *m_compressedTextureFormats;
     GLint m_num_compressedTextureFormats;
     GLint *getCompressedTextureFormats();
@@ -202,6 +204,12 @@ private:
 
     glDrawElements_client_proc_t m_glDrawElements_enc;
     static void s_glDrawElements(void *self, GLenum mode, GLsizei count, GLenum type, const void *indices);
+
+    glDrawArraysNullAEMU_client_proc_t m_glDrawArraysNullAEMU_enc;
+    static void s_glDrawArraysNullAEMU(void *self, GLenum mode, GLint first, GLsizei count);
+
+    glDrawElementsNullAEMU_client_proc_t m_glDrawElementsNullAEMU_enc;
+    static void s_glDrawElementsNullAEMU(void *self, GLenum mode, GLsizei count, GLenum type, const void *indices);
 
     glGetIntegerv_client_proc_t m_glGetIntegerv_enc;
     static void s_glGetIntegerv(void *self, GLenum pname, GLint *ptr);
@@ -717,6 +725,14 @@ private:
     glTexStorage2DMultisample_client_proc_t m_glTexStorage2DMultisample_enc;
     static void s_glTexStorage2DMultisample(void* self, GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations);
 
+    static GLenum s_glGetGraphicsResetStatusEXT(void* self);
+    static void s_glReadnPixelsEXT(void* self, GLint x, GLint y, GLsizei width,
+            GLsizei height, GLenum format, GLenum type, GLsizei bufSize,
+            GLvoid* pixels);
+    static void s_glGetnUniformfvEXT(void *self, GLuint program, GLint location,
+            GLsizei bufSize, GLfloat* params);
+    static void s_glGetnUniformivEXT(void *self, GLuint program, GLint location,
+            GLsizei bufSize, GLint* params);
 public:
     glEGLImageTargetTexture2DOES_client_proc_t m_glEGLImageTargetTexture2DOES_enc;
 
