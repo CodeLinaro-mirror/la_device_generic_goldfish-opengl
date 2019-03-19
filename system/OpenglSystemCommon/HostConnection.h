@@ -23,7 +23,12 @@
 #include "goldfish_dma.h"
 
 #include <cutils/native_handle.h>
+
+#ifdef GOLDFISH_VULKAN
+#include <mutex>
+#else
 #include <utils/threads.h>
+#endif
 
 #include <string>
 
@@ -124,8 +129,15 @@ public:
 
     bool isGrallocOnly() const { return m_grallocOnly; }
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wthread-safety-analysis"
+#endif
     void lock() const { m_lock.lock(); }
     void unlock() const { m_lock.unlock(); }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 private:
     // If the connection failed, |conn| is deleted.
@@ -160,7 +172,11 @@ private:
     std::string m_glExtensions;
     bool m_grallocOnly;
     bool m_noHostError;
+#ifdef GOLDFISH_VULKAN
+    mutable std::mutex m_lock;
+#else
     mutable android::Mutex m_lock;
+#endif
 };
 
 #endif
