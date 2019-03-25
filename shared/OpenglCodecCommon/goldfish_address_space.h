@@ -16,6 +16,7 @@
 #define ANDROID_INCLUDE_HARDWARE_GOLDFISH_ADDRESS_SPACE_H
 
 #include <inttypes.h>
+#include <stddef.h>
 
 class GoldfishAddressSpaceBlock;
 
@@ -57,6 +58,9 @@ private:
 #ifdef HOST_BUILD
     void     *m_guest_ptr;
 #else
+#ifdef __Fuchsia__
+    uint32_t  m_vmo;
+#endif
     void     *m_mmaped_ptr;
     uint64_t  m_phys_addr;
     uint64_t  m_host_addr;
