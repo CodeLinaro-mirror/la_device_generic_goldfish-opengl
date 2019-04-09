@@ -29,7 +29,8 @@ struct EmulatorFeatureInfo;
 namespace goldfish_vk {
 
 typedef uint32_t (*PFN_CreateColorBuffer)(uint32_t width, uint32_t height, uint32_t format);
-typedef uint32_t (*PFN_CloseColorBuffer)(uint32_t id);
+typedef void (*PFN_OpenColorBuffer)(uint32_t id);
+typedef void (*PFN_CloseColorBuffer)(uint32_t id);
 
 class ResourceTracker {
 public:
@@ -46,11 +47,6 @@ public:
     void unregister_##type(type); \
 
     GOLDFISH_VK_LIST_HANDLE_TYPES(HANDLE_REGISTER_DECL)
-
-    VkResult on_vkEnumerateInstanceVersion(
-        void* context,
-        VkResult input_result,
-        uint32_t* apiVersion);
 
     VkResult on_vkEnumerateInstanceExtensionProperties(
         void* context,
@@ -197,6 +193,15 @@ public:
     void on_vkDestroySemaphore(
         void* context,
         VkDevice device, VkSemaphore semaphore, const VkAllocationCallbacks *pAllocator);
+    VkResult on_vkGetSemaphoreFdKHR(
+        void* context, VkResult,
+        VkDevice device,
+        const VkSemaphoreGetFdInfoKHR* pGetFdInfo,
+        int* pFd);
+    VkResult on_vkImportSemaphoreFdKHR(
+        void* context, VkResult,
+        VkDevice device,
+        const VkImportSemaphoreFdInfoKHR* pImportSemaphoreFdInfo);
 
     VkResult on_vkQueueSubmit(
         void* context, VkResult input_result,
@@ -209,17 +214,66 @@ public:
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
     VkResult on_vkGetMemoryFuchsiaHandleKHR(
+        void* context, VkResult input_result,
         VkDevice device,
         const VkMemoryGetFuchsiaHandleInfoKHR* pInfo,
         uint32_t* pHandle);
+    VkResult on_vkGetMemoryFuchsiaHandlePropertiesKHR(
+        void* context, VkResult input_result,
+        VkDevice device,
+        VkExternalMemoryHandleTypeFlagBitsKHR handleType,
+        uint32_t handle,
+        VkMemoryFuchsiaHandlePropertiesKHR* pProperties);
     VkResult on_vkGetSemaphoreFuchsiaHandleKHR(
+        void* context, VkResult input_result,
         VkDevice device,
         const VkSemaphoreGetFuchsiaHandleInfoKHR* pInfo,
         uint32_t* pHandle);
     VkResult on_vkImportSemaphoreFuchsiaHandleKHR(
+        void* context, VkResult input_result,
         VkDevice device,
         const VkImportSemaphoreFuchsiaHandleInfoKHR* pInfo);
+    VkResult on_vkCreateBufferCollectionFUCHSIA(
+        void* context, VkResult input_result,
+        VkDevice device,
+        const VkBufferCollectionCreateInfoFUCHSIA* pInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkBufferCollectionFUCHSIA* pCollection);
+    void on_vkDestroyBufferCollectionFUCHSIA(
+        void* context, VkResult input_result,
+        VkDevice device,
+        VkBufferCollectionFUCHSIA collection,
+        const VkAllocationCallbacks* pAllocator);
+    VkResult on_vkSetBufferCollectionConstraintsFUCHSIA(
+        void* context, VkResult input_result,
+        VkDevice device,
+        VkBufferCollectionFUCHSIA collection,
+        const VkImageCreateInfo* pImageInfo);
 #endif
+
+    VkResult on_vkGetAndroidHardwareBufferPropertiesANDROID(
+        void* context, VkResult input_result,
+        VkDevice device,
+        const AHardwareBuffer* buffer,
+        VkAndroidHardwareBufferPropertiesANDROID* pProperties);
+    VkResult on_vkGetMemoryAndroidHardwareBufferANDROID(
+        void* context, VkResult input_result,
+        VkDevice device,
+        const VkMemoryGetAndroidHardwareBufferInfoANDROID *pInfo,
+        struct AHardwareBuffer** pBuffer);
+
+    VkResult on_vkCreateSamplerYcbcrConversion(
+        void* context, VkResult input_result,
+        VkDevice device,
+        const VkSamplerYcbcrConversionCreateInfo* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSamplerYcbcrConversion* pYcbcrConversion);
+    VkResult on_vkCreateSamplerYcbcrConversionKHR(
+        void* context, VkResult input_result,
+        VkDevice device,
+        const VkSamplerYcbcrConversionCreateInfo* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSamplerYcbcrConversion* pYcbcrConversion);
 
     VkResult on_vkMapMemoryIntoAddressSpaceGOOGLE_pre(
         void* context,
@@ -246,7 +300,9 @@ public:
     uint32_t getApiVersionFromDevice(VkDevice device) const;
     bool hasInstanceExtension(VkInstance instance, const std::string& name) const;
     bool hasDeviceExtension(VkDevice instance, const std::string& name) const;
-    void setColorBufferFunctions(PFN_CreateColorBuffer create, PFN_CloseColorBuffer close);
+    void setColorBufferFunctions(PFN_CreateColorBuffer create,
+                                 PFN_OpenColorBuffer open,
+                                 PFN_CloseColorBuffer close);
 
     // Transforms
     void deviceMemoryTransform_tohost(

@@ -36,7 +36,6 @@
 // required extensions, but the approach will be to
 // implement them completely on the guest side.
 #undef VK_KHR_android_surface
-#undef VK_ANDROID_external_memory_android_hardware_buffer
 
 
 namespace goldfish_vk {
@@ -1713,7 +1712,8 @@ static VkResult entry_vkCreateSamplerYcbcrConversion(
     AEMU_SCOPED_TRACE("vkCreateSamplerYcbcrConversion");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkCreateSamplerYcbcrConversion_VkResult_return = (VkResult)0;
-    vkCreateSamplerYcbcrConversion_VkResult_return = vkEnc->vkCreateSamplerYcbcrConversion(device, pCreateInfo, pAllocator, pYcbcrConversion);
+    auto resources = ResourceTracker::get();
+    vkCreateSamplerYcbcrConversion_VkResult_return = resources->on_vkCreateSamplerYcbcrConversion(vkEnc, VK_SUCCESS, device, pCreateInfo, pAllocator, pYcbcrConversion);
     return vkCreateSamplerYcbcrConversion_VkResult_return;
 }
 static void entry_vkDestroySamplerYcbcrConversion(
@@ -2432,7 +2432,8 @@ static VkResult entry_vkImportSemaphoreFdKHR(
     AEMU_SCOPED_TRACE("vkImportSemaphoreFdKHR");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkImportSemaphoreFdKHR_VkResult_return = (VkResult)0;
-    vkImportSemaphoreFdKHR_VkResult_return = vkEnc->vkImportSemaphoreFdKHR(device, pImportSemaphoreFdInfo);
+    auto resources = ResourceTracker::get();
+    vkImportSemaphoreFdKHR_VkResult_return = resources->on_vkImportSemaphoreFdKHR(vkEnc, VK_SUCCESS, device, pImportSemaphoreFdInfo);
     return vkImportSemaphoreFdKHR_VkResult_return;
 }
 static VkResult entry_vkGetSemaphoreFdKHR(
@@ -2443,7 +2444,8 @@ static VkResult entry_vkGetSemaphoreFdKHR(
     AEMU_SCOPED_TRACE("vkGetSemaphoreFdKHR");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetSemaphoreFdKHR_VkResult_return = (VkResult)0;
-    vkGetSemaphoreFdKHR_VkResult_return = vkEnc->vkGetSemaphoreFdKHR(device, pGetFdInfo, pFd);
+    auto resources = ResourceTracker::get();
+    vkGetSemaphoreFdKHR_VkResult_return = resources->on_vkGetSemaphoreFdKHR(vkEnc, VK_SUCCESS, device, pGetFdInfo, pFd);
     return vkGetSemaphoreFdKHR_VkResult_return;
 }
 #endif
@@ -2746,7 +2748,8 @@ static VkResult entry_vkCreateSamplerYcbcrConversionKHR(
     AEMU_SCOPED_TRACE("vkCreateSamplerYcbcrConversionKHR");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkCreateSamplerYcbcrConversionKHR_VkResult_return = (VkResult)0;
-    vkCreateSamplerYcbcrConversionKHR_VkResult_return = vkEnc->vkCreateSamplerYcbcrConversionKHR(device, pCreateInfo, pAllocator, pYcbcrConversion);
+    auto resources = ResourceTracker::get();
+    vkCreateSamplerYcbcrConversionKHR_VkResult_return = resources->on_vkCreateSamplerYcbcrConversionKHR(vkEnc, VK_SUCCESS, device, pCreateInfo, pAllocator, pYcbcrConversion);
     return vkCreateSamplerYcbcrConversionKHR_VkResult_return;
 }
 static void entry_vkDestroySamplerYcbcrConversionKHR(
@@ -3503,7 +3506,8 @@ static VkResult entry_vkGetAndroidHardwareBufferPropertiesANDROID(
     AEMU_SCOPED_TRACE("vkGetAndroidHardwareBufferPropertiesANDROID");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return = (VkResult)0;
-    vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return = vkEnc->vkGetAndroidHardwareBufferPropertiesANDROID(device, buffer, pProperties);
+    auto resources = ResourceTracker::get();
+    vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return = resources->on_vkGetAndroidHardwareBufferPropertiesANDROID(vkEnc, VK_SUCCESS, device, buffer, pProperties);
     return vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return;
 }
 static VkResult entry_vkGetMemoryAndroidHardwareBufferANDROID(
@@ -3514,7 +3518,8 @@ static VkResult entry_vkGetMemoryAndroidHardwareBufferANDROID(
     AEMU_SCOPED_TRACE("vkGetMemoryAndroidHardwareBufferANDROID");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return = (VkResult)0;
-    vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return = vkEnc->vkGetMemoryAndroidHardwareBufferANDROID(device, pInfo, pBuffer);
+    auto resources = ResourceTracker::get();
+    vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return = resources->on_vkGetMemoryAndroidHardwareBufferANDROID(vkEnc, VK_SUCCESS, device, pInfo, pBuffer);
     return vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return;
 }
 #endif
