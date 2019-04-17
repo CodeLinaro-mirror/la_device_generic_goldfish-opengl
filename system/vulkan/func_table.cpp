@@ -36,7 +36,6 @@
 // required extensions, but the approach will be to
 // implement them completely on the guest side.
 #undef VK_KHR_android_surface
-#undef VK_ANDROID_external_memory_android_hardware_buffer
 
 
 namespace goldfish_vk {
@@ -1022,7 +1021,8 @@ static VkResult entry_vkBeginCommandBuffer(
     AEMU_SCOPED_TRACE("vkBeginCommandBuffer");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkBeginCommandBuffer_VkResult_return = (VkResult)0;
-    vkBeginCommandBuffer_VkResult_return = vkEnc->vkBeginCommandBuffer(commandBuffer, pBeginInfo);
+    auto resources = ResourceTracker::get();
+    vkBeginCommandBuffer_VkResult_return = resources->on_vkBeginCommandBuffer(vkEnc, VK_SUCCESS, commandBuffer, pBeginInfo);
     return vkBeginCommandBuffer_VkResult_return;
 }
 static VkResult entry_vkEndCommandBuffer(
@@ -1031,7 +1031,8 @@ static VkResult entry_vkEndCommandBuffer(
     AEMU_SCOPED_TRACE("vkEndCommandBuffer");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkEndCommandBuffer_VkResult_return = (VkResult)0;
-    vkEndCommandBuffer_VkResult_return = vkEnc->vkEndCommandBuffer(commandBuffer);
+    auto resources = ResourceTracker::get();
+    vkEndCommandBuffer_VkResult_return = resources->on_vkEndCommandBuffer(vkEnc, VK_SUCCESS, commandBuffer);
     return vkEndCommandBuffer_VkResult_return;
 }
 static VkResult entry_vkResetCommandBuffer(
@@ -1041,7 +1042,8 @@ static VkResult entry_vkResetCommandBuffer(
     AEMU_SCOPED_TRACE("vkResetCommandBuffer");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkResetCommandBuffer_VkResult_return = (VkResult)0;
-    vkResetCommandBuffer_VkResult_return = vkEnc->vkResetCommandBuffer(commandBuffer, flags);
+    auto resources = ResourceTracker::get();
+    vkResetCommandBuffer_VkResult_return = resources->on_vkResetCommandBuffer(vkEnc, VK_SUCCESS, commandBuffer, flags);
     return vkResetCommandBuffer_VkResult_return;
 }
 static void entry_vkCmdBindPipeline(
@@ -1656,7 +1658,8 @@ static VkResult entry_vkGetPhysicalDeviceImageFormatProperties2(
     AEMU_SCOPED_TRACE("vkGetPhysicalDeviceImageFormatProperties2");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetPhysicalDeviceImageFormatProperties2_VkResult_return = (VkResult)0;
-    vkGetPhysicalDeviceImageFormatProperties2_VkResult_return = vkEnc->vkGetPhysicalDeviceImageFormatProperties2(physicalDevice, pImageFormatInfo, pImageFormatProperties);
+    auto resources = ResourceTracker::get();
+    vkGetPhysicalDeviceImageFormatProperties2_VkResult_return = resources->on_vkGetPhysicalDeviceImageFormatProperties2(vkEnc, VK_SUCCESS, physicalDevice, pImageFormatInfo, pImageFormatProperties);
     return vkGetPhysicalDeviceImageFormatProperties2_VkResult_return;
 }
 static void entry_vkGetPhysicalDeviceQueueFamilyProperties2(
@@ -1713,7 +1716,8 @@ static VkResult entry_vkCreateSamplerYcbcrConversion(
     AEMU_SCOPED_TRACE("vkCreateSamplerYcbcrConversion");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkCreateSamplerYcbcrConversion_VkResult_return = (VkResult)0;
-    vkCreateSamplerYcbcrConversion_VkResult_return = vkEnc->vkCreateSamplerYcbcrConversion(device, pCreateInfo, pAllocator, pYcbcrConversion);
+    auto resources = ResourceTracker::get();
+    vkCreateSamplerYcbcrConversion_VkResult_return = resources->on_vkCreateSamplerYcbcrConversion(vkEnc, VK_SUCCESS, device, pCreateInfo, pAllocator, pYcbcrConversion);
     return vkCreateSamplerYcbcrConversion_VkResult_return;
 }
 static void entry_vkDestroySamplerYcbcrConversion(
@@ -1754,7 +1758,8 @@ static void entry_vkUpdateDescriptorSetWithTemplate(
 {
     AEMU_SCOPED_TRACE("vkUpdateDescriptorSetWithTemplate");
     auto vkEnc = HostConnection::get()->vkEncoder();
-    vkEnc->vkUpdateDescriptorSetWithTemplate(device, descriptorSet, descriptorUpdateTemplate, pData);
+    auto resources = ResourceTracker::get();
+    resources->on_vkUpdateDescriptorSetWithTemplate(vkEnc, device, descriptorSet, descriptorUpdateTemplate, pData);
 }
 static void entry_vkGetPhysicalDeviceExternalBufferProperties(
     VkPhysicalDevice physicalDevice,
@@ -2232,7 +2237,8 @@ static VkResult entry_vkGetPhysicalDeviceImageFormatProperties2KHR(
     AEMU_SCOPED_TRACE("vkGetPhysicalDeviceImageFormatProperties2KHR");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetPhysicalDeviceImageFormatProperties2KHR_VkResult_return = (VkResult)0;
-    vkGetPhysicalDeviceImageFormatProperties2KHR_VkResult_return = vkEnc->vkGetPhysicalDeviceImageFormatProperties2KHR(physicalDevice, pImageFormatInfo, pImageFormatProperties);
+    auto resources = ResourceTracker::get();
+    vkGetPhysicalDeviceImageFormatProperties2KHR_VkResult_return = resources->on_vkGetPhysicalDeviceImageFormatProperties2KHR(vkEnc, VK_SUCCESS, physicalDevice, pImageFormatInfo, pImageFormatProperties);
     return vkGetPhysicalDeviceImageFormatProperties2KHR_VkResult_return;
 }
 static void entry_vkGetPhysicalDeviceQueueFamilyProperties2KHR(
@@ -2432,7 +2438,8 @@ static VkResult entry_vkImportSemaphoreFdKHR(
     AEMU_SCOPED_TRACE("vkImportSemaphoreFdKHR");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkImportSemaphoreFdKHR_VkResult_return = (VkResult)0;
-    vkImportSemaphoreFdKHR_VkResult_return = vkEnc->vkImportSemaphoreFdKHR(device, pImportSemaphoreFdInfo);
+    auto resources = ResourceTracker::get();
+    vkImportSemaphoreFdKHR_VkResult_return = resources->on_vkImportSemaphoreFdKHR(vkEnc, VK_SUCCESS, device, pImportSemaphoreFdInfo);
     return vkImportSemaphoreFdKHR_VkResult_return;
 }
 static VkResult entry_vkGetSemaphoreFdKHR(
@@ -2443,7 +2450,8 @@ static VkResult entry_vkGetSemaphoreFdKHR(
     AEMU_SCOPED_TRACE("vkGetSemaphoreFdKHR");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetSemaphoreFdKHR_VkResult_return = (VkResult)0;
-    vkGetSemaphoreFdKHR_VkResult_return = vkEnc->vkGetSemaphoreFdKHR(device, pGetFdInfo, pFd);
+    auto resources = ResourceTracker::get();
+    vkGetSemaphoreFdKHR_VkResult_return = resources->on_vkGetSemaphoreFdKHR(vkEnc, VK_SUCCESS, device, pGetFdInfo, pFd);
     return vkGetSemaphoreFdKHR_VkResult_return;
 }
 #endif
@@ -2746,7 +2754,8 @@ static VkResult entry_vkCreateSamplerYcbcrConversionKHR(
     AEMU_SCOPED_TRACE("vkCreateSamplerYcbcrConversionKHR");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkCreateSamplerYcbcrConversionKHR_VkResult_return = (VkResult)0;
-    vkCreateSamplerYcbcrConversionKHR_VkResult_return = vkEnc->vkCreateSamplerYcbcrConversionKHR(device, pCreateInfo, pAllocator, pYcbcrConversion);
+    auto resources = ResourceTracker::get();
+    vkCreateSamplerYcbcrConversionKHR_VkResult_return = resources->on_vkCreateSamplerYcbcrConversionKHR(vkEnc, VK_SUCCESS, device, pCreateInfo, pAllocator, pYcbcrConversion);
     return vkCreateSamplerYcbcrConversionKHR_VkResult_return;
 }
 static void entry_vkDestroySamplerYcbcrConversionKHR(
@@ -3503,7 +3512,8 @@ static VkResult entry_vkGetAndroidHardwareBufferPropertiesANDROID(
     AEMU_SCOPED_TRACE("vkGetAndroidHardwareBufferPropertiesANDROID");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return = (VkResult)0;
-    vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return = vkEnc->vkGetAndroidHardwareBufferPropertiesANDROID(device, buffer, pProperties);
+    auto resources = ResourceTracker::get();
+    vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return = resources->on_vkGetAndroidHardwareBufferPropertiesANDROID(vkEnc, VK_SUCCESS, device, buffer, pProperties);
     return vkGetAndroidHardwareBufferPropertiesANDROID_VkResult_return;
 }
 static VkResult entry_vkGetMemoryAndroidHardwareBufferANDROID(
@@ -3514,7 +3524,8 @@ static VkResult entry_vkGetMemoryAndroidHardwareBufferANDROID(
     AEMU_SCOPED_TRACE("vkGetMemoryAndroidHardwareBufferANDROID");
     auto vkEnc = HostConnection::get()->vkEncoder();
     VkResult vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return = (VkResult)0;
-    vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return = vkEnc->vkGetMemoryAndroidHardwareBufferANDROID(device, pInfo, pBuffer);
+    auto resources = ResourceTracker::get();
+    vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return = resources->on_vkGetMemoryAndroidHardwareBufferANDROID(vkEnc, VK_SUCCESS, device, pInfo, pBuffer);
     return vkGetMemoryAndroidHardwareBufferANDROID_VkResult_return;
 }
 #endif
@@ -3697,6 +3708,51 @@ static VkResult entry_vkRegisterBufferColorBufferGOOGLE(
     VkResult vkRegisterBufferColorBufferGOOGLE_VkResult_return = (VkResult)0;
     vkRegisterBufferColorBufferGOOGLE_VkResult_return = vkEnc->vkRegisterBufferColorBufferGOOGLE(device, buffer, colorBuffer);
     return vkRegisterBufferColorBufferGOOGLE_VkResult_return;
+}
+#endif
+#ifdef VK_GOOGLE_sized_descriptor_update_template
+static void entry_vkUpdateDescriptorSetWithTemplateSizedGOOGLE(
+    VkDevice device,
+    VkDescriptorSet descriptorSet,
+    VkDescriptorUpdateTemplate descriptorUpdateTemplate,
+    uint32_t imageInfoCount,
+    uint32_t bufferInfoCount,
+    uint32_t bufferViewCount,
+    const uint32_t* pImageInfoEntryIndices,
+    const uint32_t* pBufferInfoEntryIndices,
+    const uint32_t* pBufferViewEntryIndices,
+    const VkDescriptorImageInfo* pImageInfos,
+    const VkDescriptorBufferInfo* pBufferInfos,
+    const VkBufferView* pBufferViews)
+{
+    AEMU_SCOPED_TRACE("vkUpdateDescriptorSetWithTemplateSizedGOOGLE");
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    vkEnc->vkUpdateDescriptorSetWithTemplateSizedGOOGLE(device, descriptorSet, descriptorUpdateTemplate, imageInfoCount, bufferInfoCount, bufferViewCount, pImageInfoEntryIndices, pBufferInfoEntryIndices, pBufferViewEntryIndices, pImageInfos, pBufferInfos, pBufferViews);
+}
+#endif
+#ifdef VK_GOOGLE_async_command_buffers
+static void entry_vkBeginCommandBufferAsyncGOOGLE(
+    VkCommandBuffer commandBuffer,
+    const VkCommandBufferBeginInfo* pBeginInfo)
+{
+    AEMU_SCOPED_TRACE("vkBeginCommandBufferAsyncGOOGLE");
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    vkEnc->vkBeginCommandBufferAsyncGOOGLE(commandBuffer, pBeginInfo);
+}
+static void entry_vkEndCommandBufferAsyncGOOGLE(
+    VkCommandBuffer commandBuffer)
+{
+    AEMU_SCOPED_TRACE("vkEndCommandBufferAsyncGOOGLE");
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    vkEnc->vkEndCommandBufferAsyncGOOGLE(commandBuffer);
+}
+static void entry_vkResetCommandBufferAsyncGOOGLE(
+    VkCommandBuffer commandBuffer,
+    VkCommandBufferResetFlags flags)
+{
+    AEMU_SCOPED_TRACE("vkResetCommandBufferAsyncGOOGLE");
+    auto vkEnc = HostConnection::get()->vkEncoder();
+    vkEnc->vkResetCommandBufferAsyncGOOGLE(commandBuffer, flags);
 }
 #endif
 void* goldfish_vulkan_get_proc_address(const char* name){
@@ -5106,6 +5162,26 @@ void* goldfish_vulkan_get_proc_address(const char* name){
         return nullptr;
     }
     if (!strcmp(name, "vkRegisterBufferColorBufferGOOGLE"))
+    {
+        return nullptr;
+    }
+#endif
+#ifdef VK_GOOGLE_sized_descriptor_update_template
+    if (!strcmp(name, "vkUpdateDescriptorSetWithTemplateSizedGOOGLE"))
+    {
+        return nullptr;
+    }
+#endif
+#ifdef VK_GOOGLE_async_command_buffers
+    if (!strcmp(name, "vkBeginCommandBufferAsyncGOOGLE"))
+    {
+        return nullptr;
+    }
+    if (!strcmp(name, "vkEndCommandBufferAsyncGOOGLE"))
+    {
+        return nullptr;
+    }
+    if (!strcmp(name, "vkResetCommandBufferAsyncGOOGLE"))
     {
         return nullptr;
     }
@@ -6680,6 +6756,30 @@ void* goldfish_vulkan_get_instance_proc_address(VkInstance instance, const char*
         return hasExt ? (void*)entry_vkRegisterBufferColorBufferGOOGLE : nullptr;
     }
 #endif
+#ifdef VK_GOOGLE_sized_descriptor_update_template
+    if (!strcmp(name, "vkUpdateDescriptorSetWithTemplateSizedGOOGLE"))
+    {
+        bool hasExt = resources->hasInstanceExtension(instance, "VK_GOOGLE_sized_descriptor_update_template");
+        return hasExt ? (void*)entry_vkUpdateDescriptorSetWithTemplateSizedGOOGLE : nullptr;
+    }
+#endif
+#ifdef VK_GOOGLE_async_command_buffers
+    if (!strcmp(name, "vkBeginCommandBufferAsyncGOOGLE"))
+    {
+        bool hasExt = resources->hasInstanceExtension(instance, "VK_GOOGLE_async_command_buffers");
+        return hasExt ? (void*)entry_vkBeginCommandBufferAsyncGOOGLE : nullptr;
+    }
+    if (!strcmp(name, "vkEndCommandBufferAsyncGOOGLE"))
+    {
+        bool hasExt = resources->hasInstanceExtension(instance, "VK_GOOGLE_async_command_buffers");
+        return hasExt ? (void*)entry_vkEndCommandBufferAsyncGOOGLE : nullptr;
+    }
+    if (!strcmp(name, "vkResetCommandBufferAsyncGOOGLE"))
+    {
+        bool hasExt = resources->hasInstanceExtension(instance, "VK_GOOGLE_async_command_buffers");
+        return hasExt ? (void*)entry_vkResetCommandBufferAsyncGOOGLE : nullptr;
+    }
+#endif
     return nullptr;
 }
 void* goldfish_vulkan_get_device_proc_address(VkDevice device, const char* name){
@@ -8248,6 +8348,30 @@ void* goldfish_vulkan_get_device_proc_address(VkDevice device, const char* name)
     {
         bool hasExt = resources->hasDeviceExtension(device, "VK_GOOGLE_color_buffer");
         return hasExt ? (void*)entry_vkRegisterBufferColorBufferGOOGLE : nullptr;
+    }
+#endif
+#ifdef VK_GOOGLE_sized_descriptor_update_template
+    if (!strcmp(name, "vkUpdateDescriptorSetWithTemplateSizedGOOGLE"))
+    {
+        bool hasExt = resources->hasDeviceExtension(device, "VK_GOOGLE_sized_descriptor_update_template");
+        return hasExt ? (void*)entry_vkUpdateDescriptorSetWithTemplateSizedGOOGLE : nullptr;
+    }
+#endif
+#ifdef VK_GOOGLE_async_command_buffers
+    if (!strcmp(name, "vkBeginCommandBufferAsyncGOOGLE"))
+    {
+        bool hasExt = resources->hasDeviceExtension(device, "VK_GOOGLE_async_command_buffers");
+        return hasExt ? (void*)entry_vkBeginCommandBufferAsyncGOOGLE : nullptr;
+    }
+    if (!strcmp(name, "vkEndCommandBufferAsyncGOOGLE"))
+    {
+        bool hasExt = resources->hasDeviceExtension(device, "VK_GOOGLE_async_command_buffers");
+        return hasExt ? (void*)entry_vkEndCommandBufferAsyncGOOGLE : nullptr;
+    }
+    if (!strcmp(name, "vkResetCommandBufferAsyncGOOGLE"))
+    {
+        bool hasExt = resources->hasDeviceExtension(device, "VK_GOOGLE_async_command_buffers");
+        return hasExt ? (void*)entry_vkResetCommandBufferAsyncGOOGLE : nullptr;
     }
 #endif
     return nullptr;
