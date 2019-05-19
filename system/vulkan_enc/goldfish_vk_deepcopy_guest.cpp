@@ -6380,6 +6380,10 @@ void deepcopy_VkImportPhysicalAddressGOOGLE(
 }
 
 #endif
+#ifdef VK_GOOGLE_sized_descriptor_update_template
+#endif
+#ifdef VK_GOOGLE_async_command_buffers
+#endif
 void deepcopy_extension_struct(
     Pool* pool,
     const void* structExtension,
@@ -7022,6 +7026,18 @@ void deepcopy_extension_struct(
         case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV:
         {
             deepcopy_VkQueueFamilyCheckpointPropertiesNV(pool, reinterpret_cast<const VkQueueFamilyCheckpointPropertiesNV*>(structExtension), reinterpret_cast<VkQueueFamilyCheckpointPropertiesNV*>(structExtension_out));
+            break;
+        }
+#endif
+#ifdef VK_GOOGLE_color_buffer
+        case VK_STRUCTURE_TYPE_IMPORT_COLOR_BUFFER_GOOGLE:
+        {
+            deepcopy_VkImportColorBufferGOOGLE(pool, reinterpret_cast<const VkImportColorBufferGOOGLE*>(structExtension), reinterpret_cast<VkImportColorBufferGOOGLE*>(structExtension_out));
+            break;
+        }
+        case VK_STRUCTURE_TYPE_IMPORT_PHYSICAL_ADDRESS_GOOGLE:
+        {
+            deepcopy_VkImportPhysicalAddressGOOGLE(pool, reinterpret_cast<const VkImportPhysicalAddressGOOGLE*>(structExtension), reinterpret_cast<VkImportPhysicalAddressGOOGLE*>(structExtension_out));
             break;
         }
 #endif

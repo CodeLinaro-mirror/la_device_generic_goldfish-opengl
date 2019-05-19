@@ -24,8 +24,8 @@ namespace goldfish_vk {
 /* Construct ahw usage mask from image usage bits, see
  * 'AHardwareBuffer Usage Equivalence' in Vulkan spec.
  */
-static uint64_t
-goldfish_ahw_usage_from_vk_usage(const VkImageCreateFlags vk_create,
+uint64_t
+getAndroidHardwareBufferUsageFromVkUsage(const VkImageCreateFlags vk_create,
                                  const VkImageUsageFlags vk_usage)
 {
    uint64_t ahw_usage = 0;
@@ -59,15 +59,13 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
     VkAndroidHardwareBufferPropertiesANDROID* pProperties) {
 
     VkAndroidHardwareBufferFormatPropertiesANDROID* ahbFormatProps =
-        (VkAndroidHardwareBufferFormatPropertiesANDROID*)vk_find_struct(
-            (vk_struct_common*)pProperties->pNext,
-            VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID);
+        vk_find_struct<VkAndroidHardwareBufferFormatPropertiesANDROID>(pProperties);
 
     if (ahbFormatProps) {
         AHardwareBuffer_Desc desc;
         AHardwareBuffer_describe(buffer, &desc);
 
-       uint64_t gpu_usage =
+       const uint64_t gpu_usage =
           AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
           AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT |
           AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER;
@@ -76,11 +74,8 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
             return VK_ERROR_INVALID_EXTERNAL_HANDLE;
         }
 
-        ahbFormatProps->format =
-            vk_format_from_android(desc.format);
-
-        // Just don't, for now
-        ahbFormatProps->externalFormat = 0;
+        ahbFormatProps->format = vk_format_from_android(desc.format);
+        ahbFormatProps->externalFormat = desc.format;
 
         // The formatFeatures member must include
         // VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT and at least one of
@@ -104,7 +99,10 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
         ahbFormatProps->samplerYcbcrConversionComponents.b = VK_COMPONENT_SWIZZLE_IDENTITY;
         ahbFormatProps->samplerYcbcrConversionComponents.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 
-        ahbFormatProps->suggestedYcbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_601;
+        ahbFormatProps->suggestedYcbcrModel =
+            android_format_is_yuv(desc.format) ?
+                VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_601 :
+                VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY;
         ahbFormatProps->suggestedYcbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL;
 
         ahbFormatProps->suggestedXChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
@@ -121,13 +119,13 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
         return VK_ERROR_INVALID_EXTERNAL_HANDLE;
     }
 
-    // Disallow host visible heaps for now
+    // Disallow host visible and noflags heaps for now
     // (hard to make actual dedicated allocs)
     uint32_t memoryTypeBits = 0;
     for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; ++i) {
-        memoryTypeBits |=
-            (!isHostVisibleMemoryTypeIndexForGuest(
-             hostMemVirtInfo, i)) << i;
+        if (isNoFlagsMemoryTypeIndexForGuest(hostMemVirtInfo, i)) continue;
+        if (isHostVisibleMemoryTypeIndexForGuest(hostMemVirtInfo, i)) continue;
+        memoryTypeBits |= (1 << i);
     }
 
     pProperties->memoryTypeBits = memoryTypeBits;
@@ -209,7 +207,7 @@ VkResult createAndroidHardwareBuffer(
        h = imageExtent.height;
        layers = imageLayers;
        format = android_format_from_vk(imageFormat);
-       usage = goldfish_ahw_usage_from_vk_usage(imageCreateFlags, imageUsage);
+       usage = getAndroidHardwareBufferUsageFromVkUsage(imageCreateFlags, imageUsage);
     } else if (hasDedicatedBuffer) {
        w = bufferSize;
        format = AHARDWAREBUFFER_FORMAT_BLOB;

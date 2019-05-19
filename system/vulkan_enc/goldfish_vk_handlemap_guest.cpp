@@ -4744,6 +4744,10 @@ void handlemap_VkImportPhysicalAddressGOOGLE(
 }
 
 #endif
+#ifdef VK_GOOGLE_sized_descriptor_update_template
+#endif
+#ifdef VK_GOOGLE_async_command_buffers
+#endif
 void handlemap_extension_struct(
     VulkanHandleMapping* handlemap,
     void* structExtension_out)
@@ -5385,6 +5389,18 @@ void handlemap_extension_struct(
         case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV:
         {
             handlemap_VkQueueFamilyCheckpointPropertiesNV(handlemap, reinterpret_cast<VkQueueFamilyCheckpointPropertiesNV*>(structExtension_out));
+            break;
+        }
+#endif
+#ifdef VK_GOOGLE_color_buffer
+        case VK_STRUCTURE_TYPE_IMPORT_COLOR_BUFFER_GOOGLE:
+        {
+            handlemap_VkImportColorBufferGOOGLE(handlemap, reinterpret_cast<VkImportColorBufferGOOGLE*>(structExtension_out));
+            break;
+        }
+        case VK_STRUCTURE_TYPE_IMPORT_PHYSICAL_ADDRESS_GOOGLE:
+        {
+            handlemap_VkImportPhysicalAddressGOOGLE(handlemap, reinterpret_cast<VkImportPhysicalAddressGOOGLE*>(structExtension_out));
             break;
         }
 #endif
