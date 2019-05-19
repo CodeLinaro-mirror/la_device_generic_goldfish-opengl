@@ -40,6 +40,7 @@ vk_format_from_android(unsigned android_format)
    case AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM:
       return VK_FORMAT_R8G8B8A8_UNORM;
    case AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM:
+      return VK_FORMAT_R8G8B8A8_UNORM;
    case AHARDWAREBUFFER_FORMAT_R8G8B8_UNORM:
       return VK_FORMAT_R8G8B8_UNORM;
    case AHARDWAREBUFFER_FORMAT_R5G6B5_UNORM:
@@ -57,7 +58,7 @@ vk_format_from_android(unsigned android_format)
 }
 
 static inline unsigned
-android_format_from_vk(unsigned vk_format)
+android_format_from_vk(VkFormat vk_format)
 {
    switch (vk_format) {
    case VK_FORMAT_R8G8B8A8_UNORM:
@@ -74,6 +75,18 @@ android_format_from_vk(unsigned vk_format)
       return HAL_PIXEL_FORMAT_NV12_Y_TILED_INTEL;
    default:
       return AHARDWAREBUFFER_FORMAT_BLOB;
+   }
+}
+
+static inline bool
+android_format_is_yuv(unsigned android_format)
+{
+   switch (android_format) {
+   case HAL_PIXEL_FORMAT_NV12_Y_TILED_INTEL:
+      return true;
+
+   default:
+      return false;
    }
 }
 

@@ -1,18 +1,92 @@
+// Copyright (C) 2019 The Android Open Source Project
+// Copyright (C) 2019 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#if PLATFORM_SDK_VERSION < 26
 #include <cutils/log.h>
+#else
+#include <log/log.h>
+#endif
+
 #include "goldfish_address_space.h"
 
 #ifdef HOST_BUILD
-GoldfishAddressSpaceBlock::GoldfishAddressSpaceBlock() : m_guest_ptr(NULL) {}
-GoldfishAddressSpaceBlock::~GoldfishAddressSpaceBlock() {}
+
+#include "android/base/SubAllocator.h"
+#include "android/base/memory/LazyInstance.h"
+
+// AddressSpaceHost is a global class for obtaining physical addresses
+// for the host-side build.
+class AddressSpaceHost {
+public:
+    AddressSpaceHost() : mAlloc(0, 16ULL * 1024ULL * 1048576ULL, 4096) { }
+    uint64_t alloc(size_t size) {
+        return (uint64_t)(uintptr_t)mAlloc.alloc(size);
+    }
+    void free(uint64_t addr) {
+        mAlloc.free((void*)(uintptr_t)addr);
+    }
+private:
+    android::base::SubAllocator mAlloc;
+};
+
+static android::base::LazyInstance<AddressSpaceHost> sAddressSpaceHost =
+    LAZY_INSTANCE_INIT;
+
+// It may seem like there should be one allocator per provider,
+// but to properly reflect the guest behavior where there is only one
+// allocator in the system and multiple providers are possible,
+// we need to have a separate global object (sAddressSpaceHost).
+GoldfishAddressSpaceBlockProvider::GoldfishAddressSpaceBlockProvider()
+    : mAlloc(sAddressSpaceHost.ptr()) {}
+
+GoldfishAddressSpaceBlockProvider::~GoldfishAddressSpaceBlockProvider() { }
+
+uint64_t GoldfishAddressSpaceBlockProvider::allocPhys(size_t size) {
+    AddressSpaceHost* hostAlloc = reinterpret_cast<AddressSpaceHost*>(mAlloc);
+    return hostAlloc->alloc(size);
+}
+
+void GoldfishAddressSpaceBlockProvider::freePhys(uint64_t phys) {
+    AddressSpaceHost* hostAlloc = reinterpret_cast<AddressSpaceHost*>(mAlloc);
+    return hostAlloc->free(phys);
+}
+
+GoldfishAddressSpaceBlock::GoldfishAddressSpaceBlock() :
+    m_alloced(false), m_guest_ptr(NULL), m_phys_addr(0), m_provider(NULL) {}
+GoldfishAddressSpaceBlock::~GoldfishAddressSpaceBlock() { destroy(); }
+
+GoldfishAddressSpaceBlock &GoldfishAddressSpaceBlock::operator=(const GoldfishAddressSpaceBlock &rhs)
+{
+    m_guest_ptr = rhs.m_guest_ptr;
+    m_phys_addr = rhs.m_phys_addr;
+    m_provider = rhs.m_provider;
+    return *this;
+}
 
 bool GoldfishAddressSpaceBlock::allocate(GoldfishAddressSpaceBlockProvider *provider, size_t size)
 {
+    destroy();
+    m_phys_addr = provider->allocPhys(size);
+    m_alloced = true;
+    m_provider = provider;
     return true;
 }
 
 uint64_t GoldfishAddressSpaceBlock::physAddr() const
 {
-    return 42;  // some random number, not used
+    return m_phys_addr;
 }
 
 uint64_t GoldfishAddressSpaceBlock::hostAddr() const
@@ -33,7 +107,13 @@ void *GoldfishAddressSpaceBlock::guestPtr() const
 
 void GoldfishAddressSpaceBlock::destroy()
 {
-    m_guest_ptr = NULL;
+    if (m_alloced) {
+        m_guest_ptr = NULL;
+        if (m_provider) {
+            m_provider->freePhys(m_phys_addr);
+        }
+        m_alloced = false;
+    }
 }
 
 void GoldfishAddressSpaceBlock::replace(GoldfishAddressSpaceBlock *other)
@@ -47,8 +127,9 @@ void GoldfishAddressSpaceBlock::replace(GoldfishAddressSpaceBlock *other)
 }
 #elif __Fuchsia__
 #include <fcntl.h>
-#include <fuchsia/hardware/goldfish/c/fidl.h>
-#include <lib/fzl/fdio.h>
+#include <fuchsia/hardware/goldfish/address/space/c/fidl.h>
+#include <lib/fdio/fdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -56,22 +137,23 @@ void GoldfishAddressSpaceBlock::replace(GoldfishAddressSpaceBlock *other)
 #include <zircon/syscalls.h>
 #include <zircon/syscalls/object.h>
 
-GoldfishAddressSpaceBlockProvider::GoldfishAddressSpaceBlockProvider()
-    : m_fd(::open(GOLDFISH_ADDRESS_SPACE_DEVICE_NAME, O_RDWR)) {}
+GoldfishAddressSpaceBlockProvider::GoldfishAddressSpaceBlockProvider() {
+    fdio_get_service_handle(::open(GOLDFISH_ADDRESS_SPACE_DEVICE_NAME, O_RDWR), &m_channel);
+}
 
 GoldfishAddressSpaceBlockProvider::~GoldfishAddressSpaceBlockProvider()
 {
-    ::close(m_fd);
+    zx_handle_close(m_channel);
 }
 
 GoldfishAddressSpaceBlock::GoldfishAddressSpaceBlock()
     : m_vmo(ZX_HANDLE_INVALID)
+    , m_channel(ZX_HANDLE_INVALID)
     , m_mmaped_ptr(NULL)
     , m_phys_addr(0)
     , m_host_addr(0)
     , m_offset(0)
-    , m_size(0)
-    , m_fd(-1) {}
+    , m_size(0) {}
 
 GoldfishAddressSpaceBlock::~GoldfishAddressSpaceBlock()
 {
@@ -86,7 +168,7 @@ GoldfishAddressSpaceBlock &GoldfishAddressSpaceBlock::operator=(const GoldfishAd
     m_host_addr = rhs.m_host_addr;
     m_offset = rhs.m_offset;
     m_size = rhs.m_size;
-    m_fd = rhs.m_fd;
+    m_channel = rhs.m_channel;
 
     return *this;
 }
@@ -102,36 +184,13 @@ bool GoldfishAddressSpaceBlock::allocate(GoldfishAddressSpaceBlockProvider *prov
         return false;
     }
 
-    {
-        fzl::FdioCaller caller{fbl::unique_fd(provider->m_fd)};
-
-        int32_t res = ZX_OK;
-        zx_status_t status =
-            fuchsia_hardware_goldfish_DeviceAllocateVmo(caller.borrow_channel(),
-                                                        size, &res, &m_vmo);
-        if (status != ZX_OK || res != ZX_OK) {
-            ALOGE("%s: allocate vmo failed: %d:%d", __func__, status, res);
-            provider->m_fd = caller.release().release();
-            return false;
-        }
-
-        zx_handle_t vmo_out;
-        status = zx_handle_duplicate(m_vmo, ZX_DEFAULT_VMO_RIGHTS, &vmo_out);
-        if (status != ZX_OK) {
-            ALOGE("%s: vmo dup failed: %d:%d", __func__, status);
-            provider->m_fd = caller.release().release();
-            return false;
-        }
-
-        status = fuchsia_hardware_goldfish_DeviceGetPhysicalAddress(
-            caller.borrow_channel(),
-            vmo_out, &res, &m_phys_addr);
-        provider->m_fd = caller.release().release();
-
-        if (status != ZX_OK || res != ZX_OK) {
-            ALOGE("%s: pin vmo failed: %d:%d", __func__, status, res);
-            return false;
-        }
+    int32_t res = ZX_OK;
+    zx_status_t status =
+        fuchsia_hardware_goldfish_address_space_DeviceAllocateBlock(
+            provider->m_channel, size, &res, &m_phys_addr, &m_vmo);
+    if (status != ZX_OK || res != ZX_OK) {
+        ALOGE("%s: allocate block failed: %d:%d", __func__, status, res);
+        return false;
     }
 
     m_offset = 0;
@@ -141,7 +200,7 @@ bool GoldfishAddressSpaceBlock::allocate(GoldfishAddressSpaceBlockProvider *prov
           (unsigned long long)m_offset,
           (unsigned long long)m_size);
 
-    m_fd = provider->m_fd;
+    m_channel = provider->m_channel;
     return true;
 }
 
@@ -204,6 +263,14 @@ void GoldfishAddressSpaceBlock::destroy()
     if (m_size) {
         zx_handle_close(m_vmo);
         m_vmo = ZX_HANDLE_INVALID;
+        int32_t res = ZX_OK;
+        zx_status_t status =
+            fuchsia_hardware_goldfish_address_space_DeviceDeallocateBlock(
+                m_channel, m_phys_addr, &res);
+        if (status != ZX_OK || res != ZX_OK) {
+            ALOGE("%s: deallocate block failed: %d:%d", __func__, status, res);
+        }
+        m_channel = ZX_HANDLE_INVALID;
         m_phys_addr = 0;
         m_host_addr = 0;
         m_offset = 0;
@@ -223,7 +290,7 @@ void GoldfishAddressSpaceBlock::replace(GoldfishAddressSpaceBlock *other)
 
 bool GoldfishAddressSpaceBlockProvider::is_opened()
 {
-    return m_fd >= 0;
+    return m_channel != ZX_HANDLE_INVALID;
 }
 #else
 #include <linux/types.h>
