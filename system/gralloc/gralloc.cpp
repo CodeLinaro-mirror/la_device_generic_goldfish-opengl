@@ -389,7 +389,7 @@ static void updateHostColorBuffer(cb_handle_t* cb,
     if ((doLocked && is_rgb_format) ||
         (!grdma && (doLocked || !is_rgb_format))) {
         convertedBuf.resize(rgbSz);
-        to_send = convertedBuf.data();
+        to_send = &convertedBuf.front();
         send_buffer_size = rgbSz;
     }
 
@@ -457,6 +457,8 @@ static void updateHostColorBuffer(cb_handle_t* cb,
 //
 // gralloc device functions (alloc interface)
 //
+static void gralloc_dump(struct alloc_device_t* /*dev*/, char* /*buff*/, int /*buff_len*/) {}
+
 static int gralloc_alloc(alloc_device_t* dev,
                          int w, int h, int format, int usage,
                          buffer_handle_t* pHandle, int* pStride)
@@ -504,10 +506,6 @@ static int gralloc_alloc(alloc_device_t* dev,
             } else if (usage & GRALLOC_USAGE_HW_VIDEO_ENCODER) {
                 // Camera-to-encoder is NV21
                 format = HAL_PIXEL_FORMAT_YCrCb_420_SP;
-            } else if ((usage & GRALLOC_USAGE_HW_CAMERA_MASK) ==
-                    GRALLOC_USAGE_HW_CAMERA_ZSL) {
-                // Camera-to-ZSL-queue is RGB_888
-                format = HAL_PIXEL_FORMAT_RGB_888;
             }
         }
 
@@ -541,11 +539,6 @@ static int gralloc_alloc(alloc_device_t* dev,
         case HAL_PIXEL_FORMAT_BGRA_8888:
             bpp = 4;
             glFormat = GL_RGBA;
-            glType = GL_UNSIGNED_BYTE;
-            break;
-        case HAL_PIXEL_FORMAT_RGB_888:
-            bpp = 3;
-            glFormat = GL_RGB;
             glType = GL_UNSIGNED_BYTE;
             break;
         case HAL_PIXEL_FORMAT_RGB_565:
@@ -620,7 +613,13 @@ static int gralloc_alloc(alloc_device_t* dev,
             // We are going to use RGB888 on the host
             glFormat = GL_RGB;
             glType = GL_UNSIGNED_BYTE;
-            selectedEmuFrameworkFormat = FRAMEWORK_FORMAT_YUV_420_888;
+
+            if (usage & (GRALLOC_USAGE_HW_CAMERA_READ | GRALLOC_USAGE_HW_CAMERA_WRITE)) {
+                // EmulatedFakeCamera3.cpp assumes it is NV21
+                selectedEmuFrameworkFormat = FRAMEWORK_FORMAT_YUV_420_888_INTERLEAVED;
+            } else {
+                selectedEmuFrameworkFormat = FRAMEWORK_FORMAT_YUV_420_888;
+            }
             break;
         default:
             ALOGE("gralloc_alloc: Unknown format %d", format);
@@ -1358,12 +1357,21 @@ static int gralloc_lock_ycbcr(gralloc_module_t const* module,
             cStep = 1;
             break;
         case HAL_PIXEL_FORMAT_YCbCr_420_888:
-            yStride = cb->width;
-            cStride = yStride / 2;
-            yOffset = 0;
-            uOffset = cb->height * yStride;
-            vOffset = uOffset + cStride * cb->height / 2;
-            cStep = 1;
+            if (cb->emuFrameworkFormat == FRAMEWORK_FORMAT_YUV_420_888_INTERLEAVED) {
+                yStride = cb->width;
+                cStride = cb->width;
+                yOffset = 0;
+                vOffset = yStride * cb->height;
+                uOffset = vOffset + 1;
+                cStep = 2;
+            } else {
+                yStride = cb->width;
+                cStride = yStride / 2;
+                yOffset = 0;
+                uOffset = cb->height * yStride;
+                vOffset = uOffset + cStride * cb->height / 2;
+                cStep = 1;
+            }
             break;
         default:
             ALOGE("gralloc_lock_ycbcr unexpected internal format %x",
@@ -1430,6 +1438,7 @@ static int gralloc_device_open(const hw_module_t* module,
 
         dev->device.alloc   = gralloc_alloc;
         dev->device.free    = gralloc_free;
+        dev->device.dump = gralloc_dump;
         pthread_mutex_init(&dev->lock, NULL);
 
         *device = &dev->device.common;
