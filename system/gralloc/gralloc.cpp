@@ -479,6 +479,7 @@ static int gralloc_alloc(alloc_device_t* dev,
     bool sw_write = (0 != (usage & GRALLOC_USAGE_SW_WRITE_MASK));
     bool hw_write = (usage & GRALLOC_USAGE_HW_RENDER);
     bool sw_read = (0 != (usage & GRALLOC_USAGE_SW_READ_MASK));
+    const bool hw_texture = usage & GRALLOC_USAGE_HW_TEXTURE;
 #if PLATFORM_SDK_VERSION >= 17
     bool hw_cam_write = (usage & GRALLOC_USAGE_HW_CAMERA_WRITE);
     bool hw_cam_read = (usage & GRALLOC_USAGE_HW_CAMERA_READ);
@@ -541,6 +542,15 @@ static int gralloc_alloc(alloc_device_t* dev,
             glFormat = GL_RGBA;
             glType = GL_UNSIGNED_BYTE;
             break;
+        case HAL_PIXEL_FORMAT_RGB_888:
+            if (hw_texture) {
+                return -EINVAL;  // we dont support RGB_888 for HW textures
+            } else {
+                bpp = 3;
+                glFormat = GL_RGB;
+                glType = GL_UNSIGNED_BYTE;
+                break;
+            }
         case HAL_PIXEL_FORMAT_RGB_565:
             bpp = 2;
             // Workaround: distinguish vs the RGB8/RGBA8
@@ -613,13 +623,7 @@ static int gralloc_alloc(alloc_device_t* dev,
             // We are going to use RGB888 on the host
             glFormat = GL_RGB;
             glType = GL_UNSIGNED_BYTE;
-
-            if (usage & (GRALLOC_USAGE_HW_CAMERA_READ | GRALLOC_USAGE_HW_CAMERA_WRITE)) {
-                // EmulatedFakeCamera3.cpp assumes it is NV21
-                selectedEmuFrameworkFormat = FRAMEWORK_FORMAT_YUV_420_888_INTERLEAVED;
-            } else {
-                selectedEmuFrameworkFormat = FRAMEWORK_FORMAT_YUV_420_888;
-            }
+            selectedEmuFrameworkFormat = FRAMEWORK_FORMAT_YUV_420_888;
             break;
         default:
             ALOGE("gralloc_alloc: Unknown format %d", format);
@@ -1195,7 +1199,9 @@ static int gralloc_lock(gralloc_module_t const* module,
             return -EBUSY;
         }
 
-        if (sw_read) {
+        // camera delivers bits to the buffer directly and does not require
+        // an explicit read, it also writes in YUV_420 (interleaved)
+        if (sw_read & !(usage & GRALLOC_USAGE_HW_CAMERA_MASK)) {
             void* rgb_addr = cpu_addr;
             char* tmpBuf = 0;
             if (cb->frameworkFormat == HAL_PIXEL_FORMAT_YV12 ||
@@ -1319,8 +1325,10 @@ static int gralloc_lock_ycbcr(gralloc_module_t const* module,
         return -EINVAL;
     }
 
+    usage |= (cb->usage & GRALLOC_USAGE_HW_CAMERA_MASK);
+
     void *vaddr;
-    int ret = gralloc_lock(module, handle, usage | GRALLOC_USAGE_SW_WRITE_MASK, l, t, w, h, &vaddr);
+    int ret = gralloc_lock(module, handle, usage, l, t, w, h, &vaddr);
     if (ret) {
         return ret;
     }
@@ -1357,7 +1365,7 @@ static int gralloc_lock_ycbcr(gralloc_module_t const* module,
             cStep = 1;
             break;
         case HAL_PIXEL_FORMAT_YCbCr_420_888:
-            if (cb->emuFrameworkFormat == FRAMEWORK_FORMAT_YUV_420_888_INTERLEAVED) {
+            if (usage & GRALLOC_USAGE_HW_CAMERA_MASK) {
                 yStride = cb->width;
                 cStride = cb->width;
                 yOffset = 0;
@@ -1542,6 +1550,10 @@ struct private_module_t HAL_MODULE_INFO_SYM = {
         lock: gralloc_lock,
         unlock: gralloc_unlock,
         perform: NULL,
+#if PLATFORM_SDK_VERSION >= 28 // In Q, we want to specify these, but SDK version is not 29 yet. do not merge this to P
+        validateBufferSize: NULL,
+        getTransportSize: NULL,
+#endif // PLATFORM_VERSION > 28
 #if PLATFORM_SDK_VERSION >= 18
         lock_ycbcr: gralloc_lock_ycbcr,
 #endif // PLATFORM_SDK_VERSION >= 18
