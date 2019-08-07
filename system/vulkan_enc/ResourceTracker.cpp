@@ -34,13 +34,14 @@ void zx_event_create(int, zx_handle_t*) { }
 #ifdef VK_USE_PLATFORM_FUCHSIA
 
 #include <cutils/native_handle.h>
-#include <fuchsia/hardware/goldfish/control/c/fidl.h>
+#include <fuchsia/hardware/goldfish/control/cpp/fidl.h>
 #include <fuchsia/sysmem/cpp/fidl.h>
 #include <lib/fdio/directory.h>
 #include <lib/fdio/fd.h>
 #include <lib/fdio/fdio.h>
 #include <lib/fdio/io.h>
 #include <lib/zx/channel.h>
+#include <lib/zx/vmo.h>
 #include <zircon/process.h>
 #include <zircon/syscalls.h>
 #include <zircon/syscalls/object.h>
@@ -546,13 +547,16 @@ public:
                 ALOGE("failed to open control device");
                 abort();
             }
-            zx_status_t status = fdio_get_service_handle(fd, &mControlDevice);
+            zx::channel channel;
+            zx_status_t status = fdio_get_service_handle(fd, channel.reset_and_get_address());
             if (status != ZX_OK) {
                 ALOGE("failed to get control service handle, status %d", status);
                 abort();
             }
-            status = fuchsia_hardware_goldfish_control_DeviceConnectSysmem(
-                mControlDevice,
+            mControlDevice.Bind(std::move(channel));
+
+            status = fdio_service_connect(
+                "/svc/fuchsia.sysmem.Allocator",
                 mSysmemAllocator.NewRequest().TakeChannel().release());
             if (status != ZX_OK) {
                 ALOGE("failed to get sysmem connection, status %d", status);
@@ -1161,9 +1165,6 @@ public:
         if (handleType != VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA) {
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        if (pProperties->sType != VK_STRUCTURE_TYPE_TEMP_MEMORY_ZIRCON_HANDLE_PROPERTIES_FUCHSIA) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
 
         AutoLock lock(mLock);
 
@@ -1305,10 +1306,12 @@ public:
         buffer_constraints.max_size_bytes = 0xffffffff;
         buffer_constraints.physically_contiguous_required = false;
         buffer_constraints.secure_required = false;
-        buffer_constraints.secure_permitted = false;
         buffer_constraints.ram_domain_supported = false;
         buffer_constraints.cpu_domain_supported = false;
-        buffer_constraints.gpu_domain_supported = true;
+        buffer_constraints.inaccessible_domain_supported = true;
+        buffer_constraints.heap_permitted_count = 1;
+        buffer_constraints.heap_permitted[0] =
+            fuchsia::sysmem::HeapType::GOLDFISH_DEVICE_LOCAL;
         constraints.image_format_constraints_count = 1;
         fuchsia::sysmem::ImageFormatConstraints& image_constraints =
             constraints.image_format_constraints[0];
@@ -1704,9 +1707,7 @@ public:
         }
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
-        if (vmo_handle == ZX_HANDLE_INVALID &&
-            !isHostVisibleMemoryTypeIndexForGuest(
-                &mHostVisibleMemoryVirtInfo, finalAllocInfo.memoryTypeIndex)) {
+        if (exportVmo) {
             bool hasDedicatedImage = dedicatedAllocInfoPtr &&
                 (dedicatedAllocInfoPtr->image != VK_NULL_HANDLE);
             VkImageCreateInfo imageCreateInfo = {};
@@ -1721,7 +1722,10 @@ public:
                 imageCreateInfo = imageInfo.createInfo;
             }
 
-            if (imageCreateInfo.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
+            if (imageCreateInfo.usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                         VK_IMAGE_USAGE_SAMPLED_BIT)) {
                 fuchsia::sysmem::BufferCollectionTokenSyncPtr token;
                 zx_status_t status = mSysmemAllocator->AllocateSharedCollection(
                     token.NewRequest());
@@ -1757,18 +1761,21 @@ public:
 
                 collection->Close();
 
-                zx_handle_t vmo_copy;
-                status = zx_handle_duplicate(vmo_handle, ZX_RIGHT_SAME_RIGHTS, &vmo_copy);
+                zx::vmo vmo_copy;
+                status = zx_handle_duplicate(vmo_handle,
+                                             ZX_RIGHT_SAME_RIGHTS,
+                                             vmo_copy.reset_and_get_address());
                 if (status != ZX_OK) {
                     ALOGE("Failed to duplicate VMO: %d", status);
                     abort();
                 }
-                status = fuchsia_hardware_goldfish_control_DeviceCreateColorBuffer(
-                    mControlDevice,
-                    vmo_copy,
+                // TODO(reveman): Use imageCreateInfo.format to determine color
+                // buffer format.
+                status = mControlDevice->CreateColorBuffer(
+                    std::move(vmo_copy),
                     imageCreateInfo.extent.width,
                     imageCreateInfo.extent.height,
-                    fuchsia_hardware_goldfish_control_FormatType_BGRA,
+                    fuchsia::hardware::goldfish::control::FormatType::BGRA,
                     &status2);
                 if (status != ZX_OK || status2 != ZX_OK) {
                     ALOGE("CreateColorBuffer failed: %d:%d", status, status2);
@@ -1778,25 +1785,23 @@ public:
         }
 
         if (vmo_handle != ZX_HANDLE_INVALID) {
-            zx_handle_t vmo_copy;
+            zx::vmo vmo_copy;
             zx_status_t status = zx_handle_duplicate(vmo_handle,
                                                      ZX_RIGHT_SAME_RIGHTS,
-                                                     &vmo_copy);
+                                                     vmo_copy.reset_and_get_address());
             if (status != ZX_OK) {
                 ALOGE("Failed to duplicate VMO: %d", status);
                 abort();
             }
             zx_status_t status2 = ZX_OK;
-            status = fuchsia_hardware_goldfish_control_DeviceGetColorBuffer(
-                mControlDevice, vmo_copy, &status2, &importCbInfo.colorBuffer);
+            status = mControlDevice->GetColorBuffer(
+                std::move(vmo_copy), &status2, &importCbInfo.colorBuffer);
             if (status != ZX_OK || status2 != ZX_OK) {
                 ALOGE("GetColorBuffer failed: %d:%d", status, status2);
             }
             vk_append_struct(&structChainIter, &importCbInfo);
         }
 #endif
-
-        // TODO if (exportVmo) { }
 
         if (!isHostVisibleMemoryTypeIndexForGuest(
                 &mHostVisibleMemoryVirtInfo,
@@ -2176,27 +2181,26 @@ public:
             auto collection = reinterpret_cast<fuchsia::sysmem::BufferCollectionSyncPtr*>(
                 extBufferCollectionPtr->collection);
             uint32_t index = extBufferCollectionPtr->index;
-            zx_handle_t vmo_handle = ZX_HANDLE_INVALID;
+            zx::vmo vmo;
 
             fuchsia::sysmem::BufferCollectionInfo_2 info;
             zx_status_t status2;
             zx_status_t status = (*collection)->WaitForBuffersAllocated(&status2, &info);
             if (status == ZX_OK && status2 == ZX_OK) {
                 if (index < info.buffer_count) {
-                    vmo_handle = info.buffers[index].vmo.release();
+                    vmo = std::move(info.buffers[index].vmo);
                 }
             } else {
                 ALOGE("WaitForBuffersAllocated failed: %d %d", status, status2);
             }
 
-            if (vmo_handle != ZX_HANDLE_INVALID) {
+            if (vmo.is_valid()) {
                 zx_status_t status2 = ZX_OK;
-                status = fuchsia_hardware_goldfish_control_DeviceCreateColorBuffer(
-                    mControlDevice,
-                    vmo_handle,
+                status = mControlDevice->CreateColorBuffer(
+                    std::move(vmo),
                     localCreateInfo.extent.width,
                     localCreateInfo.extent.height,
-                    fuchsia_hardware_goldfish_control_FormatType_BGRA,
+                    fuchsia::hardware::goldfish::control::FormatType::BGRA,
                     &status2);
                 if (status != ZX_OK || status2 != ZX_OK) {
                     ALOGE("CreateColorBuffer failed: %d:%d", status, status2);
@@ -2205,6 +2209,9 @@ public:
         }
 
         // Allow external memory for all color attachments on fuchsia.
+        // Note: This causes external to be set to true below. The result
+        // is that a dedicated memory allocation is required for the image,
+        // which allows the memory to be exported.
         if (localCreateInfo.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
             if (!extImgCiPtr) {
                 localExtImgCi.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
@@ -3205,7 +3212,7 @@ private:
     int mSyncDeviceFd = -1;
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
-    zx_handle_t mControlDevice = ZX_HANDLE_INVALID;
+    fuchsia::hardware::goldfish::control::DeviceSyncPtr mControlDevice;
     fuchsia::sysmem::AllocatorSyncPtr mSysmemAllocator;
 #endif
 };
