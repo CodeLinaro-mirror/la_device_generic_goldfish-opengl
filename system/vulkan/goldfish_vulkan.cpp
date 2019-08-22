@@ -17,6 +17,9 @@
 
 #include <errno.h>
 #include <string.h>
+#ifdef VK_USE_PLATFORM_FUCHSIA
+#include <unistd.h>
+#endif
 
 #include "HostConnection.h"
 #include "ResourceTracker.h"
@@ -103,6 +106,37 @@ EnumeratePhysicalDeviceGroups(VkInstance /*instance*/,
     return VK_SUCCESS;
 }
 
+VkResult
+CreateDebugReportCallbackEXT(VkInstance /*instance*/,
+                             const VkDebugReportCallbackCreateInfoEXT* /*pCreateInfo*/,
+                             const VkAllocationCallbacks* /*pAllocator*/,
+                             VkDebugReportCallbackEXT* /*pCallback*/)
+{
+    AEMU_SCOPED_TRACE("vkstubhal::CreateDebugReportCallbackEXT");
+    return VK_SUCCESS;
+}
+
+void
+DestroyDebugReportCallbackEXT(VkInstance /*instance*/,
+                              VkDebugReportCallbackEXT /*callback*/,
+                              const VkAllocationCallbacks* /*pAllocator*/)
+{
+    AEMU_SCOPED_TRACE("vkstubhal::DestroyDebugReportCallbackEXT");
+}
+
+void
+DebugReportMessageEXT(VkInstance /*instance*/,
+                      VkDebugReportFlagsEXT /*flags*/,
+                      VkDebugReportObjectTypeEXT /*objectType*/,
+                      uint64_t /*object*/,
+                      size_t /*location*/,
+                      int32_t /*messageCode*/,
+                      const char* /*pLayerPrefix*/,
+                      const char* /*pMessage*/)
+{
+    AEMU_SCOPED_TRACE("vkstubhal::DebugReportMessageEXT");
+}
+
 #ifdef VK_USE_PLATFORM_FUCHSIA
 VkResult
 GetMemoryZirconHandleFUCHSIA(VkDevice /*device*/,
@@ -186,8 +220,17 @@ PFN_vkVoidFunction GetInstanceProcAddr(VkInstance instance,
     if (strcmp(name, "vkEnumeratePhysicalDeviceGroups") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(
             EnumeratePhysicalDeviceGroups);
+    if (strcmp(name, "vkEnumeratePhysicalDeviceGroupsKHR") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(
+            EnumeratePhysicalDeviceGroups);
     if (strcmp(name, "vkGetInstanceProcAddr") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(GetInstanceProcAddr);
+    if (strcmp(name, "vkCreateDebugReportCallbackEXT") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(CreateDebugReportCallbackEXT);
+    if (strcmp(name, "vkDestroyDebugReportCallbackEXT") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(DestroyDebugReportCallbackEXT);
+    if (strcmp(name, "vkDebugReportMessageEXT") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(DebugReportMessageEXT);
 #ifdef VK_USE_PLATFORM_FUCHSIA
     if (strcmp(name, "vkGetMemoryZirconHandleFUCHSIA") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(GetMemoryZirconHandleFUCHSIA);
@@ -568,7 +611,7 @@ int OpenDevice(const hw_module_t* /*module*/,
 
 class VulkanDevice {
 public:
-    VulkanDevice() {
+    VulkanDevice() : mHostSupportsGoldfish(access(QEMU_PIPE_PATH, F_OK) != -1) {
         goldfish_vk::ResourceTracker::get();
     }
 
@@ -578,8 +621,14 @@ public:
     }
 
     PFN_vkVoidFunction GetInstanceProcAddr(VkInstance instance, const char* name) {
+        if (!mHostSupportsGoldfish) {
+            return vkstubhal::GetInstanceProcAddr(instance, name);
+        }
         return ::GetInstanceProcAddr(instance, name);
     }
+
+private:
+    const bool mHostSupportsGoldfish;
 };
 
 extern "C" __attribute__((visibility("default"))) PFN_vkVoidFunction
