@@ -21,12 +21,15 @@
 #include <errno.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
+#include <hardware/gralloc.h>
 
 #if PLATFORM_SDK_VERSION < 28
 #include "gralloc_cb.h"
 #else
 #include "../../shared/OpenglCodecCommon/gralloc_cb.h"
 #endif
+
+#include "gralloc_common.h"
 
 #include "goldfish_dma.h"
 #include "goldfish_address_space.h"
@@ -79,11 +82,72 @@ static const bool isHidlGralloc = true;
 static const bool isHidlGralloc = false;
 #endif
 
-int32_t* getOpenCountPtr(cb_handle_t* cb) {
-    return ((int32_t*)cb->ashmemBase) + 1;
+const uint32_t CB_HANDLE_MAGIC_OLD = CB_HANDLE_MAGIC_BASE | 0x1;
+
+struct cb_handle_old_t : public cb_handle_t {
+    cb_handle_old_t(int p_fd, int p_ashmemSize, int p_usage,
+                    int p_width, int p_height,
+                    int p_format, int p_glFormat, int p_glType)
+            : cb_handle_t(p_fd,
+                          QEMU_PIPE_INVALID_HANDLE,
+                          CB_HANDLE_MAGIC_OLD,
+                          0,
+                          p_usage,
+                          p_width,
+                          p_height,
+                          p_format,
+                          p_glFormat,
+                          p_glType,
+                          p_ashmemSize,
+                          NULL),
+              ashmemBasePid(0),
+              mappedPid(0) {
+        numInts = CB_HANDLE_NUM_INTS(numFds);
+    }
+
+    bool hasRefcountPipe() const {
+        return qemu_pipe_valid(hostHandleRefCountFd);
+    }
+
+    void setRefcountPipeFd(QEMU_PIPE_HANDLE fd) {
+        if (qemu_pipe_valid(fd)) {
+            numFds++;
+        }
+        hostHandleRefCountFd = fd;
+        numInts = CB_HANDLE_NUM_INTS(numFds);
+    }
+
+    bool canBePosted() const {
+        return (0 != (usage & GRALLOC_USAGE_HW_FB));
+    }
+
+    bool isValid() const {
+        return (version == sizeof(native_handle)) && (magic == CB_HANDLE_MAGIC_OLD);
+    }
+
+    static cb_handle_old_t* from(void* p) {
+        if (!p) { return NULL; }
+        cb_handle_old_t* cb = static_cast<cb_handle_old_t*>(p);
+        return cb->isValid() ? cb : NULL;
+    }
+
+    static const cb_handle_old_t* from(const void* p) {
+        return from(const_cast<void*>(p));
+    }
+
+    static cb_handle_old_t* from_unconst(const void* p) {
+        return from(const_cast<void*>(p));
+    }
+
+    int32_t ashmemBasePid;      // process id which mapped the ashmem region
+    int32_t mappedPid;          // process id which succeeded gralloc_register call
+};
+
+int32_t* getOpenCountPtr(const cb_handle_old_t* cb) {
+    return ((int32_t*)cb->getBufferPtr()) + 1;
 }
 
-uint32_t getAshmemColorOffset(cb_handle_t* cb) {
+uint32_t getAshmemColorOffset(cb_handle_old_t* cb) {
     uint32_t res = 0;
     if (cb->canBePosted()) res = GOLDFISH_OFFSET_UNIT;
     if (isHidlGralloc) res = GOLDFISH_OFFSET_UNIT * 2;
@@ -324,12 +388,12 @@ static void dump_regions(ExtendedRCEncoderContext *) {
 }
 #endif
 
-static void get_ashmem_region(ExtendedRCEncoderContext *rcEnc, cb_handle_t *cb) {
+static void get_ashmem_region(ExtendedRCEncoderContext *rcEnc, cb_handle_old_t *cb) {
 #if DEBUG
     dump_regions(rcEnc);
 #endif
 
-    get_mem_region((void*)cb->ashmemBase);
+    get_mem_region(cb->getBufferPtr());
 
 #if DEBUG
     dump_regions(rcEnc);
@@ -338,18 +402,18 @@ static void get_ashmem_region(ExtendedRCEncoderContext *rcEnc, cb_handle_t *cb) 
     get_gralloc_region(rcEnc);
 }
 
-static bool put_ashmem_region(ExtendedRCEncoderContext *rcEnc, cb_handle_t *cb) {
+static bool put_ashmem_region(ExtendedRCEncoderContext *rcEnc, cb_handle_old_t *cb) {
 #if DEBUG
     dump_regions(rcEnc);
 #endif
 
-    const bool should_unmap = put_mem_region(rcEnc, (void*)cb->ashmemBase);
+    const bool should_unmap = put_mem_region(rcEnc, cb->getBufferPtr());
 
 #if DEBUG
     dump_regions(rcEnc);
 #endif
 
-    put_gralloc_region(rcEnc, cb->ashmemSize);
+    put_gralloc_region(rcEnc, cb->bufferSize);
 
     return should_unmap;
 }
@@ -361,26 +425,23 @@ struct fb_device_t {
     framebuffer_device_t  device;
 };
 
-static int map_buffer(cb_handle_t *cb, void **vaddr)
+static int map_buffer(cb_handle_old_t *cb, void **vaddr)
 {
-    if (cb->fd < 0 || cb->ashmemSize <= 0) {
+    if (cb->bufferFd < 0) {
         return -EINVAL;
     }
 
-    int map_flags = MAP_SHARED;
-    if (isHidlGralloc) map_flags |= MAP_ANONYMOUS;
-
-    void *addr = mmap(0, cb->ashmemSize, PROT_READ | PROT_WRITE,
-                      MAP_SHARED, cb->fd, 0);
+    void *addr = mmap(0, cb->bufferSize, PROT_READ | PROT_WRITE,
+                      MAP_SHARED, cb->bufferFd, 0);
     if (addr == MAP_FAILED) {
         ALOGE("%s: failed to map ashmem region!", __FUNCTION__);
         return -errno;
     }
 
-    cb->ashmemBase = intptr_t(addr);
+    cb->setBufferPtr(addr);
     cb->ashmemBasePid = getpid();
     D("%s: %p mapped ashmem base %p size %d\n", __FUNCTION__,
-      cb, cb->ashmemBase, cb->ashmemSize);
+      cb, addr, cb->bufferSize);
 
     *vaddr = addr;
     return 0;
@@ -418,7 +479,7 @@ static HostConnection* createOrGetHostConnection() {
 #define HAL_PIXEL_FORMAT_YCbCr_420_888 0xFFFFFFFF
 #endif
 
-static void updateHostColorBuffer(cb_handle_t* cb,
+static void updateHostColorBuffer(cb_handle_old_t* cb,
                               bool doLocked,
                               char* pixels) {
     D("%s: call. doLocked=%d", __FUNCTION__, doLocked);
@@ -436,8 +497,8 @@ static void updateHostColorBuffer(cb_handle_t* cb,
     uint32_t rgbSz = width * height * bpp;
     uint32_t send_buffer_size = rgbSz;
     bool is_rgb_format =
-        cb->frameworkFormat != HAL_PIXEL_FORMAT_YV12 &&
-        cb->frameworkFormat != HAL_PIXEL_FORMAT_YCbCr_420_888;
+        cb->format != HAL_PIXEL_FORMAT_YV12 &&
+        cb->format != HAL_PIXEL_FORMAT_YCbCr_420_888;
 
     std::vector<char> convertedBuf;
 
@@ -457,7 +518,7 @@ static void updateHostColorBuffer(cb_handle_t* cb,
     }
 
     if (hasDMA && !grdma->bigbufCount) {
-        switch (cb->frameworkFormat) {
+        switch (cb->format) {
         case HAL_PIXEL_FORMAT_YV12:
             get_yv12_offsets(width, height, NULL, NULL, &send_buffer_size);
             break;
@@ -468,7 +529,8 @@ static void updateHostColorBuffer(cb_handle_t* cb,
         }
 
         if (grdma->address_space_block.guestPtr()) {
-            rcEnc->bindAddressSpaceBlock(&grdma->address_space_block);
+            rcEnc->bindDmaDirectly(grdma->address_space_block.guestPtr(),
+                                   grdma->address_space_block.physAddr());
         } else if (grdma->goldfish_dma.mapped_addr) {
             rcEnc->bindDmaContext(&grdma->goldfish_dma);
         } else {
@@ -483,7 +545,7 @@ static void updateHostColorBuffer(cb_handle_t* cb,
                 to_send, send_buffer_size);
         pthread_mutex_unlock(&grdma->lock);
     } else {
-        switch (cb->frameworkFormat) {
+        switch (cb->format) {
         case HAL_PIXEL_FORMAT_YV12:
             convertedBuf.resize(rgbSz);
             to_send = &convertedBuf.front();
@@ -496,51 +558,67 @@ static void updateHostColorBuffer(cb_handle_t* cb,
         case HAL_PIXEL_FORMAT_YCbCr_420_888:
             convertedBuf.resize(rgbSz);
             to_send = &convertedBuf.front();
-            if (rcEnc->hasYUV420toNV21()) {
-                nv21_to_rgb888(to_send, pixels,
-                               width, height, left, top,
-                               left + width - 1, top + height - 1);
-            } else {
-                yuv420p_to_rgb888(to_send, pixels,
-                                  width, height, left, top,
-                                  left + width - 1, top + height - 1);
-            }
+            yuv420p_to_rgb888(to_send, pixels,
+                              width, height, left, top,
+                              left + width - 1, top + height - 1);
             break;
         }
+
         rcEnc->rcUpdateColorBuffer(rcEnc, cb->hostHandle,
                 left, top, width, height,
                 cb->glFormat, cb->glType, to_send);
     }
 }
 
-#ifndef GL_RGBA16F
-#define GL_RGBA16F                        0x881A
-#endif // GL_RGBA16F
-#ifndef GL_HALF_FLOAT
-#define GL_HALF_FLOAT                     0x140B
-#endif // GL_HALF_FLOAT
-#ifndef GL_RGB10_A2
-#define GL_RGB10_A2                       0x8059
-#endif // GL_RGB10_A2
-#ifndef GL_UNSIGNED_INT_2_10_10_10_REV
-#define GL_UNSIGNED_INT_2_10_10_10_REV    0x8368
-#endif // GL_UNSIGNED_INT_2_10_10_10_REV
 //
 // gralloc device functions (alloc interface)
 //
 static void gralloc_dump(struct alloc_device_t* /*dev*/, char* /*buff*/, int /*buff_len*/) {}
 
+static int gralloc_get_buffer_format(const int frameworkFormat, const int usage) {
+    // Pick the right concrete pixel format given the endpoints as encoded in
+    // the usage bits.  Every end-point pair needs explicit listing here.
+#if PLATFORM_SDK_VERSION >= 17
+    if (frameworkFormat == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
+        // Camera as producer
+        if (usage & GRALLOC_USAGE_HW_CAMERA_WRITE) {
+            if (usage & GRALLOC_USAGE_HW_TEXTURE) {
+                // Camera-to-display is RGBA
+                return HAL_PIXEL_FORMAT_RGBA_8888;
+            } else if (usage & GRALLOC_USAGE_HW_VIDEO_ENCODER) {
+                // Camera-to-encoder is NV21
+                return HAL_PIXEL_FORMAT_YCrCb_420_SP;
+            }
+        }
+
+        ALOGE("gralloc_alloc: Requested auto format selection, "
+              "but no known format for this usage=%x", usage);
+        return -EINVAL;
+    } else if (frameworkFormat == HAL_PIXEL_FORMAT_YCbCr_420_888) {
+        ALOGW("gralloc_alloc: Requested YCbCr_420_888, taking experimental path. "
+              "usage=%x", usage);
+    }
+#endif // PLATFORM_SDK_VERSION >= 17
+
+    return frameworkFormat;
+}
+
 static int gralloc_alloc(alloc_device_t* dev,
-                         int w, int h, int format, int usage,
+                         int w, int h, const int frameworkFormat, int usage,
                          buffer_handle_t* pHandle, int* pStride)
 {
-    D("gralloc_alloc w=%d h=%d usage=0x%x format=0x%x\n", w, h, usage, format);
+    D("gralloc_alloc w=%d h=%d usage=0x%x frameworkFormat=0x%x\n", w, h, usage, frameworkFormat);
 
     gralloc_device_t *grdev = (gralloc_device_t *)dev;
     if (!grdev || !pHandle || !pStride) {
         ALOGE("gralloc_alloc: Bad inputs (grdev: %p, pHandle: %p, pStride: %p",
                 grdev, pHandle, pStride);
         return -EINVAL;
+    }
+
+    const int format = gralloc_get_buffer_format(frameworkFormat, usage);
+    if (format < 0) {
+        return format;
     }
 
     //
@@ -570,38 +648,7 @@ static int gralloc_alloc(alloc_device_t* dev,
     bool hw_vid_enc_read = false;
 #endif // PLATFORM_SDK_VERSION
 
-    // Keep around original requested format for later validation
-    int frameworkFormat = format;
-    // Pick the right concrete pixel format given the endpoints as encoded in
-    // the usage bits.  Every end-point pair needs explicit listing here.
-#if PLATFORM_SDK_VERSION >= 17
-    if (format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
-        // Camera as producer
-        if (usage & GRALLOC_USAGE_HW_CAMERA_WRITE) {
-            if (usage & GRALLOC_USAGE_HW_TEXTURE) {
-                // Camera-to-display is RGBA
-                format = HAL_PIXEL_FORMAT_RGBA_8888;
-            } else if (usage & GRALLOC_USAGE_HW_VIDEO_ENCODER) {
-                // Camera-to-encoder is NV21
-                format = HAL_PIXEL_FORMAT_YCrCb_420_SP;
-            }
-        }
-
-        if (format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
-            ALOGE("gralloc_alloc: Requested auto format selection, "
-                    "but no known format for this usage: %d x %d, usage %x",
-                    w, h, usage);
-            return -EINVAL;
-        }
-    }
-    else if (format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
-        ALOGW("gralloc_alloc: Requested YCbCr_420_888, taking experimental path. "
-                "usage: %d x %d, usage %x",
-                w, h, usage);
-    }
-#endif // PLATFORM_SDK_VERSION >= 17
     bool yuv_format = false;
-
     int ashmem_size = 0;
     int stride = w;
 
@@ -716,10 +763,8 @@ static int gralloc_alloc(alloc_device_t* dev,
     //
     DEFINE_AND_VALIDATE_HOST_CONNECTION;
 #if PLATFORM_SDK_VERSION >= 17
-    // GPU_DATA_BUFFER is defined in hardware/interfaces/graphics/common/1.0/types.hal
-#   define _GRALLOC_USAGE_GPU_DATA_BUFFER 0x1000000
     bool needHostCb = ((!yuv_format && frameworkFormat != HAL_PIXEL_FORMAT_BLOB) ||
-                      usage & _GRALLOC_USAGE_GPU_DATA_BUFFER ||
+                      usage & GOLDFISH_GRALLOC_USAGE_GPU_DATA_BUFFER ||
 #else
     bool needHostCb = (!yuv_format ||
 #endif // !(PLATFORM_SDK_VERSION >= 17)
@@ -790,9 +835,9 @@ static int gralloc_alloc(alloc_device_t* dev,
         }
     }
 
-    cb_handle_t *cb = new cb_handle_t(fd, ashmem_size, usage,
-                                      w, h, frameworkFormat, format,
-                                      glFormat, glType, selectedEmuFrameworkFormat);
+    cb_handle_old_t *cb = new cb_handle_old_t(fd, ashmem_size, usage,
+                                              w, h, format,
+                                              glFormat, glType);
 
     if (ashmem_size > 0) {
         //
@@ -805,7 +850,6 @@ static int gralloc_alloc(alloc_device_t* dev,
             delete cb;
             return err;
         }
-        cb->setFd(fd);
     }
 
     const bool hasDMA = has_DMA_support(rcEnc);
@@ -824,7 +868,7 @@ static int gralloc_alloc(alloc_device_t* dev,
 
             hostCon->lock();
             if (hasDMA) {
-                cb->hostHandle = rcEnc->rcCreateColorBufferDMA(rcEnc, w, h, allocFormat, cb->emuFrameworkFormat);
+                cb->hostHandle = rcEnc->rcCreateColorBufferDMA(rcEnc, w, h, allocFormat, selectedEmuFrameworkFormat);
             } else {
                 cb->hostHandle = rcEnc->rcCreateColorBuffer(rcEnc, w, h, allocFormat);
             }
@@ -882,20 +926,20 @@ static int gralloc_free(alloc_device_t* dev,
 {
     DEFINE_AND_VALIDATE_HOST_CONNECTION;
 
-    cb_handle_t *cb = (cb_handle_t *)handle;
-    if (!cb_handle_t::validate((cb_handle_t*)cb)) {
-        ERR("gralloc_free: invalid handle");
+    const cb_handle_old_t *cb = cb_handle_old_t::from(handle);
+    if (!cb) {
+        ERR("gralloc_free: invalid handle %p", handle);
         return -EINVAL;
     }
 
     D("%s: for buf %p ptr %p size %d\n",
-      __FUNCTION__, handle, cb->ashmemBase, cb->ashmemSize);
+      __FUNCTION__, handle, cb->getBufferPtr(), cb->bufferSize);
 
     if (cb->hostHandle && !cb->hasRefcountPipe()) {
         int32_t openCount = 1;
         int32_t* openCountPtr = &openCount;
 
-        if (isHidlGralloc && cb->ashmemBase) {
+        if (isHidlGralloc && cb->getBufferPtr()) {
             openCountPtr = getOpenCountPtr(cb);
         }
 
@@ -913,17 +957,17 @@ static int gralloc_free(alloc_device_t* dev,
     //
     // detach and unmap ashmem area if present
     //
-    if (cb->fd > 0) {
-        if (cb->ashmemSize > 0 && cb->ashmemBase) {
-            D("%s: unmapped %p", __FUNCTION__, cb->ashmemBase);
-            munmap((void *)cb->ashmemBase, cb->ashmemSize);
-            put_gralloc_region(rcEnc, cb->ashmemSize);
+    if (cb->bufferFd > 0) {
+        if (cb->bufferSize > 0 && cb->getBufferPtr()) {
+            D("%s: unmapped %p", __FUNCTION__, cb->getBufferPtr());
+            munmap(cb->getBufferPtr(), cb->bufferSize);
+            put_gralloc_region(rcEnc, cb->bufferSize);
         }
-        close(cb->fd);
+        close(cb->bufferFd);
     }
 
-    if(qemu_pipe_valid(cb->refcount_pipe_fd)) {
-        qemu_pipe_close(cb->refcount_pipe_fd);
+    if(qemu_pipe_valid(cb->hostHandleRefCountFd)) {
+        qemu_pipe_close(cb->hostHandleRefCountFd);
     }
     D("%s: done", __FUNCTION__);
     // remove it from the allocated list
@@ -966,9 +1010,14 @@ static int fb_compositionComplete(struct framebuffer_device_t* dev)
 static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
 {
     fb_device_t *fbdev = (fb_device_t *)dev;
-    cb_handle_t *cb = (cb_handle_t *)buffer;
-
-    if (!fbdev || !cb_handle_t::validate(cb) || !cb->canBePosted()) {
+    if (!fbdev) {
+        return -EINVAL;
+    }
+    const cb_handle_old_t *cb = cb_handle_old_t::from(buffer);
+    if (!cb) {
+        return -EINVAL;
+    }
+    if (!cb->canBePosted()) {
         return -EINVAL;
     }
 
@@ -976,7 +1025,7 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
     DEFINE_AND_VALIDATE_HOST_CONNECTION;
 
     // increment the post count of the buffer
-    intptr_t *postCountPtr = (intptr_t *)cb->ashmemBase;
+    int32_t *postCountPtr = (int32_t *)cb->getBufferPtr();
     if (!postCountPtr) {
         // This should not happen
         return -EINVAL;
@@ -1064,15 +1113,18 @@ static int gralloc_register_buffer(gralloc_module_t const* module,
     }
 
     private_module_t *gr = (private_module_t *)module;
-    cb_handle_t *cb = (cb_handle_t *)handle;
+    if (!gr) {
+        return -EINVAL;
+    }
 
-    if (!gr || !cb_handle_t::validate(cb)) {
+    cb_handle_old_t *cb = cb_handle_old_t::from_unconst(handle);
+    if (!cb) {
         ERR("gralloc_register_buffer(%p): invalid buffer", cb);
         return -EINVAL;
     }
 
-    D("gralloc_register_buffer(%p) w %d h %d format 0x%x framworkFormat 0x%x",
-        handle, cb->width, cb->height, cb->format, cb->frameworkFormat);
+    D("gralloc_register_buffer(%p) w %d h %d format 0x%x",
+        handle, cb->width, cb->height, cb->format);
 
     if (cb->hostHandle != 0 && !cb->hasRefcountPipe()) {
         D("Opening host ColorBuffer 0x%x\n", cb->hostHandle);
@@ -1085,7 +1137,7 @@ static int gralloc_register_buffer(gralloc_module_t const* module,
     // if the color buffer has ashmem region and it is not mapped in this
     // process map it now.
     //
-    if (cb->ashmemSize > 0 && cb->mappedPid != getpid()) {
+    if (cb->bufferSize > 0 && cb->mappedPid != getpid()) {
         void *vaddr;
         int err = map_buffer(cb, &vaddr);
         if (err) {
@@ -1100,7 +1152,7 @@ static int gralloc_register_buffer(gralloc_module_t const* module,
         }
     }
 
-    if (cb->ashmemSize > 0) {
+    if (cb->bufferSize > 0) {
         get_ashmem_region(rcEnc, cb);
     }
 
@@ -1117,9 +1169,12 @@ static int gralloc_unregister_buffer(gralloc_module_t const* module,
     }
 
     private_module_t *gr = (private_module_t *)module;
-    cb_handle_t *cb = (cb_handle_t *)handle;
+    if (!gr) {
+        return -EINVAL;
+    }
 
-    if (!gr || !cb_handle_t::validate(cb)) {
+    cb_handle_old_t *cb = cb_handle_old_t::from_unconst(handle);
+    if (!cb) {
         ERR("gralloc_unregister_buffer(%p): invalid buffer", cb);
         return -EINVAL;
     }
@@ -1133,7 +1188,7 @@ static int gralloc_unregister_buffer(gralloc_module_t const* module,
         if (isHidlGralloc) {
             // Queue up another rcCloseColorBuffer if applicable.
             // invariant: have ashmem.
-            if (cb->ashmemSize > 0 && cb->mappedPid == getpid()) {
+            if (cb->bufferSize > 0 && cb->mappedPid == getpid()) {
                 int32_t* openCountPtr = getOpenCountPtr(cb);
                 if (*openCountPtr == -1) {
                     D("%s: revenge of the rcCloseColorBuffer!", __func__);
@@ -1149,16 +1204,16 @@ static int gralloc_unregister_buffer(gralloc_module_t const* module,
     // unmap ashmem region if it was previously mapped in this process
     // (through register_buffer)
     //
-    if (cb->ashmemSize > 0 && cb->mappedPid == getpid()) {
+    if (cb->bufferSize > 0 && cb->mappedPid == getpid()) {
         const bool should_unmap = put_ashmem_region(rcEnc, cb);
         if (!should_unmap) goto done;
 
-        int err = munmap((void *)cb->ashmemBase, cb->ashmemSize);
+        int err = munmap(cb->getBufferPtr(), cb->bufferSize);
         if (err) {
             ERR("gralloc_unregister_buffer(%p): unmap failed", cb);
             return -EINVAL;
         }
-        cb->ashmemBase = 0;
+        cb->bufferSize = 0;
         cb->mappedPid = 0;
         D("%s: Unregister buffer previous mapped to pid %d", __FUNCTION__, getpid());
     }
@@ -1178,9 +1233,12 @@ static int gralloc_lock(gralloc_module_t const* module,
     }
 
     private_module_t *gr = (private_module_t *)module;
-    cb_handle_t *cb = (cb_handle_t *)handle;
+    if (!gr) {
+        return -EINVAL;
+    }
 
-    if (!gr || !cb_handle_t::validate(cb)) {
+    cb_handle_old_t *cb = cb_handle_old_t::from_unconst(handle);
+    if (!cb) {
         ALOGE("gralloc_lock bad handle\n");
         return -EINVAL;
     }
@@ -1232,7 +1290,6 @@ static int gralloc_lock(gralloc_module_t const* module,
         //return -EINVAL;
     }
 
-    intptr_t postCount = 0;
     void *cpu_addr = NULL;
 
     //
@@ -1241,11 +1298,11 @@ static int gralloc_lock(gralloc_module_t const* module,
     if (cb->canBePosted() || sw_read || sw_write ||
             hw_cam_write || hw_cam_read ||
             hw_vid_enc_read) {
-        if (cb->ashmemBasePid != getpid() || !cb->ashmemBase) {
+        if (cb->ashmemBasePid != getpid() || !cb->getBufferPtr()) {
             return -EACCES;
         }
 
-        cpu_addr = (void *)(cb->ashmemBase + getAshmemColorOffset(cb));
+        cpu_addr = (void *)((char*)cb->getBufferPtr() + getAshmemColorOffset(cb));
     }
 
     if (cb->hostHandle) {
@@ -1257,28 +1314,27 @@ static int gralloc_lock(gralloc_module_t const* module,
         // flush color buffer write cache on host and get its sync status.
         //
         int hostSyncStatus = rcEnc->rcColorBufferCacheFlush(rcEnc, cb->hostHandle,
-                                                            postCount,
+                                                            0,
                                                             sw_read);
         if (hostSyncStatus < 0) {
             // host failed the color buffer sync - probably since it was already
             // locked for write access. fail the lock.
-            ALOGE("gralloc_lock cacheFlush failed postCount=%d sw_read=%d\n",
-                 (int)postCount, sw_read);
+            ALOGE("gralloc_lock cacheFlush failed sw_read=%d\n", sw_read);
             return -EBUSY;
         }
 
         // camera delivers bits to the buffer directly and does not require
-        // an explicit read, it also writes in YUV_420 (interleaved)
+        // an explicit read.
         if (sw_read & !(usage & GRALLOC_USAGE_HW_CAMERA_MASK)) {
             D("gralloc_lock read back color buffer %d %d ashmem base %p sz %d\n",
               cb->width, cb->height, cb->ashmemBase, cb->ashmemSize);
             void* rgb_addr = cpu_addr;
             char* tmpBuf = 0;
-            if (cb->frameworkFormat == HAL_PIXEL_FORMAT_YV12 ||
-                cb->frameworkFormat == HAL_PIXEL_FORMAT_YCbCr_420_888) {
+            if (cb->format == HAL_PIXEL_FORMAT_YV12 ||
+                cb->format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
                 if (rcEnc->hasYUVCache()) {
                     uint32_t buffer_size;
-                    if (cb->frameworkFormat == HAL_PIXEL_FORMAT_YV12) {
+                    if (cb->format == HAL_PIXEL_FORMAT_YV12) {
                        get_yv12_offsets(cb->width, cb->height, NULL, NULL,
                                         &buffer_size);
                     } else {
@@ -1294,17 +1350,12 @@ static int gralloc_lock(gralloc_module_t const* module,
                     tmpBuf = new char[cb->width * cb->height * 3];
                     rcEnc->rcReadColorBuffer(rcEnc, cb->hostHandle,
                                               0, 0, cb->width, cb->height, cb->glFormat, cb->glType, tmpBuf);
-                    if (cb->frameworkFormat == HAL_PIXEL_FORMAT_YV12) {
+                    if (cb->format == HAL_PIXEL_FORMAT_YV12) {
                         D("convert rgb888 to yv12 here");
                         rgb888_to_yv12((char*)cpu_addr, tmpBuf, cb->width, cb->height, l, t, l+w-1, t+h-1);
-                    } else if (cb->frameworkFormat == HAL_PIXEL_FORMAT_YCbCr_420_888) {
-                        if (rcEnc->hasYUV420toNV21()) {
-                            D("convert rgb888 to nv21 here");
-                            rgb888_to_nv21((char*)cpu_addr, tmpBuf, cb->width, cb->height, l, t, l+w-1, t+h-1);
-                        } else {
-                            D("convert rgb888 to yuv420p here");
-                            rgb888_to_yuv420p((char*)cpu_addr, tmpBuf, cb->width, cb->height, l, t, l+w-1, t+h-1);
-                        }
+                    } else if (cb->format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
+                        D("convert rgb888 to yuv420p here");
+                        rgb888_to_yuv420p((char*)cpu_addr, tmpBuf, cb->width, cb->height, l, t, l+w-1, t+h-1);
                     }
                     delete [] tmpBuf;
                 }
@@ -1315,7 +1366,7 @@ static int gralloc_lock(gralloc_module_t const* module,
         }
 
         if (has_DMA_support(rcEnc)) {
-            gralloc_dmaregion_register_ashmem(rcEnc, cb->ashmemSize);
+            gralloc_dmaregion_register_ashmem(rcEnc, cb->bufferSize);
         }
         hostCon->unlock();
     }
@@ -1351,10 +1402,13 @@ static int gralloc_unlock(gralloc_module_t const* module,
     }
 
     private_module_t *gr = (private_module_t *)module;
-    cb_handle_t *cb = (cb_handle_t *)handle;
+    if (!gr) {
+        return -EINVAL;
+    }
 
-    if (!gr || !cb_handle_t::validate(cb)) {
-        ALOGD("%s: invalid gr or cb handle. -EINVAL", __FUNCTION__);
+    cb_handle_old_t *cb = cb_handle_old_t::from_unconst(handle);
+    if (!cb) {
+        ALOGD("%s: invalid cb handle. -EINVAL", __FUNCTION__);
         return -EINVAL;
     }
 
@@ -1368,14 +1422,13 @@ static int gralloc_unlock(gralloc_module_t const* module,
         DEFINE_AND_VALIDATE_HOST_CONNECTION;
         hostCon->lock();
 
-        void *cpu_addr = (void *)(cb->ashmemBase + getAshmemColorOffset(cb));
+        char *cpu_addr = (char*)cb->getBufferPtr() + getAshmemColorOffset(cb);
 
-        char* rgb_addr = (char *)cpu_addr;
         if (cb->lockedWidth < cb->width || cb->lockedHeight < cb->height) {
-            updateHostColorBuffer(cb, true, rgb_addr);
+            updateHostColorBuffer(cb, true, cpu_addr);
         }
         else {
-            updateHostColorBuffer(cb, false, rgb_addr);
+            updateHostColorBuffer(cb, false, cpu_addr);
         }
 
         hostCon->unlock();
@@ -1404,18 +1457,22 @@ static int gralloc_lock_ycbcr(gralloc_module_t const* module,
     }
 
     private_module_t *gr = (private_module_t *)module;
-    cb_handle_t *cb = (cb_handle_t *)handle;
-    if (!gr || !cb_handle_t::validate(cb)) {
+    if (!gr) {
+        return -EINVAL;
+    }
+
+    cb_handle_old_t *cb = cb_handle_old_t::from_unconst(handle);
+    if (!cb) {
         ALOGE("%s: bad colorbuffer handle. -EINVAL", __FUNCTION__);
         return -EINVAL;
     }
 
-    if (cb->frameworkFormat != HAL_PIXEL_FORMAT_YV12 &&
-        cb->frameworkFormat != HAL_PIXEL_FORMAT_YCbCr_420_888) {
+    if (cb->format != HAL_PIXEL_FORMAT_YV12 &&
+        cb->format != HAL_PIXEL_FORMAT_YCbCr_420_888) {
         ALOGE("gralloc_lock_ycbcr can only be used with "
                 "HAL_PIXEL_FORMAT_YCbCr_420_888 or HAL_PIXEL_FORMAT_YV12, got %x instead. "
                 "-EINVAL",
-                cb->frameworkFormat);
+                cb->format);
         return -EINVAL;
     }
 
@@ -1458,34 +1515,14 @@ static int gralloc_lock_ycbcr(gralloc_module_t const* module,
             uOffset = vOffset + cSize;
             cStep = 1;
             break;
-        case HAL_PIXEL_FORMAT_YCbCr_420_888: {
-            DEFINE_AND_VALIDATE_HOST_CONNECTION
-            if (rcEnc->hasYUV420toNV21()) {
-                yStride = cb->width;
-                cStride = cb->width;
-                yOffset = 0;
-                vOffset = yStride * cb->height;
-                uOffset = vOffset + 1;
-                cStep = 2;
-            } else {
-                if (usage & GRALLOC_USAGE_HW_CAMERA_MASK) {
-                    yStride = cb->width;
-                    cStride = cb->width;
-                    yOffset = 0;
-                    vOffset = yStride * cb->height;
-                    uOffset = vOffset + 1;
-                    cStep = 2;
-                } else {
-                    yStride = cb->width;
-                    cStride = yStride / 2;
-                    yOffset = 0;
-                    uOffset = cb->height * yStride;
-                    vOffset = uOffset + cStride * cb->height / 2;
-                    cStep = 1;
-                }
-            }
+        case HAL_PIXEL_FORMAT_YCbCr_420_888:
+            yStride = cb->width;
+            cStride = yStride / 2;
+            yOffset = 0;
+            uOffset = cb->height * yStride;
+            vOffset = uOffset + cStride * cb->height / 2;
+            cStep = 1;
             break;
-        }
         default:
             ALOGE("gralloc_lock_ycbcr unexpected internal format %x",
                     cb->format);

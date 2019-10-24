@@ -27,13 +27,14 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <numeric>
 #include <sstream>
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
 #include <set>
+#include <cutils/native_handle.h>
 
-#include "gralloc_cb.h"
 #include "MiniFence.h"
 #include "HostConnection.h"
 
@@ -257,6 +258,13 @@ private:
         HWC2::Error updateLayerZ(hwc2_layer_t layerId, uint32_t z);
         HWC2::Error getClientTargetSupport(uint32_t width, uint32_t height,
                  int32_t format, int32_t dataspace);
+        // 2.3 required functions
+        HWC2::Error getDisplayIdentificationData(uint8_t* outPort,
+                 uint32_t* outDataSize, uint8_t* outData);
+        HWC2::Error getDisplayCapabilities(uint32_t* outNumCapabilities,
+                 uint32_t* outCapabilities);
+        HWC2::Error getDisplayBrightnessSupport(bool *out_support);
+        HWC2::Error setDisplayBrightness(float brightness);
 
         // Read configs from PRIMARY Display
         int populatePrimaryConfigs();
@@ -345,6 +353,8 @@ private:
         // Display ID generator.
         static std::atomic<hwc2_display_t> sNextId;
         const hwc2_display_t mId;
+        // emulator side displayId
+        uint32_t mHostDisplayId;
         std::string mName;
         HWC2::DisplayType mType;
         HWC2::PowerMode mPowerMode;
@@ -474,7 +484,8 @@ private:
     };
     std::unordered_map<HWC2::Callback, CallbackInfo> mCallbacks;
 
-    std::unordered_map<hwc2_display_t, std::shared_ptr<Display>> mDisplays;
+    // use map so displays can be pluged in by order of ID, 0, 1, 2, 3, etc.
+    std::map<hwc2_display_t, std::shared_ptr<Display>> mDisplays;
     std::unordered_map<hwc2_layer_t, std::shared_ptr<Layer>> mLayers;
 
 };
