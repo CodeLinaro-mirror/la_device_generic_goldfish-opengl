@@ -15,6 +15,8 @@
 */
 #include "HostConnection.h"
 
+#include "cutils/properties.h"
+
 #ifdef GOLDFISH_NO_GL
 struct gl_client_context_t {
     int placeholder;
@@ -32,6 +34,8 @@ public:
     GL2Encoder(IOStream*, ChecksumCalculator*) { }
     void setContextAccessor(gl2_client_context_t *()) { }
     void setNoHostError(bool) { }
+    void setDrawCallFlushInterval(uint32_t) { }
+    void setHasAsyncUnmapBuffer(int) { }
 };
 #else
 #include "GLEncoder.h"
@@ -40,6 +44,7 @@ public:
 
 #ifdef GOLDFISH_VULKAN
 #include "VkEncoder.h"
+#include "AddressSpaceStream.h"
 #else
 namespace goldfish_vk {
 struct VkEncoder {
@@ -47,6 +52,12 @@ struct VkEncoder {
     int placeholder;
 };
 } // namespace goldfish_vk
+class QemuPipeStream;
+typedef QemuPipeStream AddressSpaceStream;
+AddressSpaceStream* createAddressSpaceStream(size_t bufSize) {
+    ALOGE("%s: FATAL: Trying to create ASG stream in unsupported build\n", __func__);
+    abort();
+}
 #endif
 
 using goldfish_vk::VkEncoder;
@@ -73,23 +84,47 @@ using goldfish_vk::VkEncoder;
 #define STREAM_BUFFER_SIZE  (4*1024*1024)
 #define STREAM_PORT_NUM     22468
 
-enum HostConnectionType {
-    HOST_CONNECTION_TCP = 0,
-    HOST_CONNECTION_QEMU_PIPE = 1,
-    HOST_CONNECTION_VIRTIO_GPU = 2,
-};
+static HostConnectionType getConnectionTypeFromProperty() {
+    char transportValue[PROPERTY_VALUE_MAX] = "";
+    property_get("ro.kernel.qemu.gltransport", transportValue, "");
+
+    bool isValid = transportValue[0] != '\0';
+    if (!isValid) return HOST_CONNECTION_QEMU_PIPE;
+
+    if (!strcmp("tcp", transportValue)) return HOST_CONNECTION_TCP;
+    if (!strcmp("pipe", transportValue)) return HOST_CONNECTION_QEMU_PIPE;
+    if (!strcmp("virtio-gpu", transportValue)) return HOST_CONNECTION_VIRTIO_GPU;
+    if (!strcmp("asg", transportValue)) return HOST_CONNECTION_ADDRESS_SPACE;
+
+    return HOST_CONNECTION_QEMU_PIPE;
+}
+
+static uint32_t getDrawCallFlushIntervalFromProperty() {
+    char flushValue[PROPERTY_VALUE_MAX] = "";
+    property_get("ro.kernel.qemu.gltransport.drawFlushInterval", flushValue, "");
+
+    bool isValid = flushValue[0] != '\0';
+    if (!isValid) return 800;
+
+    long interval = strtol(flushValue, 0, 10);
+
+    if (!interval) return 800;
+
+    return (uint32_t)interval;
+}
+
 
 class GoldfishGralloc : public Gralloc
 {
 public:
     uint32_t getHostHandle(native_handle_t const* handle)
     {
-        return ((cb_handle_t *)handle)->hostHandle;
+        return cb_handle_t::from(handle)->hostHandle;
     }
 
     int getFormat(native_handle_t const* handle)
     {
-        return ((cb_handle_t *)handle)->format;
+        return cb_handle_t::from(handle)->format;
     }
 };
 
@@ -114,9 +149,7 @@ HostConnection::HostConnection() :
     m_checksumHelper(),
     m_glExtensions(),
     m_grallocOnly(true),
-    m_noHostError(false)
-{
-}
+    m_noHostError(false) { }
 
 HostConnection::~HostConnection()
 {
@@ -135,10 +168,23 @@ HostConnection::~HostConnection()
 HostConnection* HostConnection::connect(HostConnection* con) {
     if (!con) return con;
 
-    const enum HostConnectionType connType = HOST_CONNECTION_VIRTIO_GPU;
+    const enum HostConnectionType connType = getConnectionTypeFromProperty();
+    // const enum HostConnectionType connType = HOST_CONNECTION_VIRTIO_GPU;
 
     switch (connType) {
-        default:
+        case HOST_CONNECTION_ADDRESS_SPACE: {
+            AddressSpaceStream *stream = createAddressSpaceStream(STREAM_BUFFER_SIZE);
+            if (!stream) {
+                ALOGE("Failed to create AddressSpaceStream for host connection!!!\n");
+                delete con;
+                return NULL;
+            }
+            con->m_connectionType = HOST_CONNECTION_ADDRESS_SPACE;
+            con->m_stream = stream;
+            con->m_grallocHelper = &m_goldfishGralloc;
+            con->m_processPipe = &m_goldfishProcessPipe;
+            break;
+        }
         case HOST_CONNECTION_QEMU_PIPE: {
             QemuPipeStream *stream = new QemuPipeStream(STREAM_BUFFER_SIZE);
             if (!stream) {
@@ -152,12 +198,19 @@ HostConnection* HostConnection::connect(HostConnection* con) {
                 delete con;
                 return NULL;
             }
+            con->m_connectionType = HOST_CONNECTION_QEMU_PIPE;
             con->m_stream = stream;
             con->m_grallocHelper = &m_goldfishGralloc;
             con->m_processPipe = &m_goldfishProcessPipe;
             break;
         }
         case HOST_CONNECTION_TCP: {
+#ifdef __Fuchsia__
+            ALOGE("Fuchsia doesn't support HOST_CONNECTION_TCP!!!\n");
+            delete con;
+            return NULL;
+            break;
+#else
             TcpStream *stream = new TcpStream(STREAM_BUFFER_SIZE);
             if (!stream) {
                 ALOGE("Failed to create TcpStream for host connection!!!\n");
@@ -171,10 +224,12 @@ HostConnection* HostConnection::connect(HostConnection* con) {
                 delete con;
                 return NULL;
             }
+            con->m_connectionType = HOST_CONNECTION_TCP;
             con->m_stream = stream;
             con->m_grallocHelper = &m_goldfishGralloc;
             con->m_processPipe = &m_goldfishProcessPipe;
             break;
+#endif
         }
 #ifdef VIRTIO_GPU
         case HOST_CONNECTION_VIRTIO_GPU: {
@@ -190,11 +245,15 @@ HostConnection* HostConnection::connect(HostConnection* con) {
                 delete con;
                 return NULL;
             }
+            con->m_connectionType = HOST_CONNECTION_VIRTIO_GPU;
             con->m_stream = stream;
             con->m_grallocHelper = stream->getGralloc();
             con->m_processPipe = stream->getProcessPipe();
             break;
         }
+#else
+        default:
+            break;
 #endif
     }
 
@@ -206,6 +265,8 @@ HostConnection* HostConnection::connect(HostConnection* con) {
 
     ALOGD("HostConnection::get() New Host Connection established %p, tid %d\n",
           con, getCurrentThreadId());
+
+    // ALOGD("Address space echo latency check done\n");
     return con;
 }
 
@@ -271,6 +332,9 @@ GL2Encoder *HostConnection::gl2Encoder()
             m_gl2Enc, getCurrentThreadId());
         m_gl2Enc->setContextAccessor(s_getGL2Context);
         m_gl2Enc->setNoHostError(m_noHostError);
+        m_gl2Enc->setDrawCallFlushInterval(
+            getDrawCallFlushIntervalFromProperty());
+        m_gl2Enc->setHasAsyncUnmapBuffer(m_rcEnc->hasAsyncUnmapBuffer());
     }
     return m_gl2Enc;
 }
@@ -298,8 +362,8 @@ ExtendedRCEncoderContext *HostConnection::rcEncoder()
         queryAndSetDeferredVulkanCommandsSupport(m_rcEnc);
         queryAndSetVulkanNullOptionalStringsSupport(m_rcEnc);
         queryAndSetVulkanCreateResourcesWithRequirementsSupport(m_rcEnc);
-        queryAndSetYUV420888toNV21(m_rcEnc);
         queryAndSetYUVCache(m_rcEnc);
+        queryAndSetAsyncUnmapBuffer(m_rcEnc);
         if (m_processPipe) {
             m_processPipe->processPipeInit(m_rcEnc);
         }
@@ -474,16 +538,17 @@ void HostConnection::queryAndSetVulkanCreateResourcesWithRequirementsSupport(Ext
     }
 }
 
-void HostConnection::queryAndSetYUV420888toNV21(ExtendedRCEncoderContext* rcEnc) {
-    std::string glExtensions = queryGLExtensions(rcEnc);
-    if (glExtensions.find(kYUV420888toNV21) != std::string::npos) {
-        rcEnc->featureInfo()->hasYUV420888toNV21 = true;
-    }
-}
-
 void HostConnection::queryAndSetYUVCache(ExtendedRCEncoderContext* rcEnc) {
     std::string glExtensions = queryGLExtensions(rcEnc);
     if (glExtensions.find(kYUVCache) != std::string::npos) {
         rcEnc->featureInfo()->hasYUVCache = true;
     }
 }
+
+void HostConnection::queryAndSetAsyncUnmapBuffer(ExtendedRCEncoderContext* rcEnc) {
+    std::string glExtensions = queryGLExtensions(rcEnc);
+    if (glExtensions.find(kAsyncUnmapBuffer) != std::string::npos) {
+        rcEnc->featureInfo()->hasAsyncUnmapBuffer = true;
+    }
+}
+
