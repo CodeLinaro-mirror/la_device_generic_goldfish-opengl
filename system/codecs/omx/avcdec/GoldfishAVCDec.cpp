@@ -162,6 +162,9 @@ bool GoldfishAVCDec::getVUIParams(h264_image_t& img) {
     ColorUtils::convertIsoColorAspectsToCodecAspects(
             primaries, transfer, coeffs, fullRange, colorAspects);
 
+    ALOGD("img pts %lld, primaries %d, range %d transfer %d colorspace %d", (long long)img.pts,
+            (int)img.color_primaries, (int)img.color_range, (int)img.color_trc, (int)img.colorspace);
+
     // Update color aspects if necessary.
     if (colorAspectsDiffer(colorAspects, mBitstreamColorAspects)) {
         mBitstreamColorAspects = colorAspects;
@@ -204,10 +207,30 @@ bool GoldfishAVCDec::setDecodeArgs(
     return true;
 }
 
+void GoldfishAVCDec::readAndDiscardAllHostBuffers() {
+    while (mContext) {
+        h264_image_t img = mContext->getImage();
+        if (img.data != nullptr) {
+            ALOGD("img pts %lld is discarded", (long long)img.pts);
+        } else {
+            return;
+        }
+    }
+}
+
 void GoldfishAVCDec::onPortFlushCompleted(OMX_U32 portIndex) {
     /* Once the output buffers are flushed, ignore any buffers that are held in decoder */
     if (kOutputPortIndex == portIndex) {
         setFlushMode();
+        ALOGD("%s %d", __func__, __LINE__);
+        readAndDiscardAllHostBuffers();
+        mContext->resetH264Context(mWidth, mHeight, mWidth, mHeight, MediaH264Decoder::PixelFormat::YUV420P);
+        if (!mCsd0.empty() && !mCsd1.empty()) {
+            mContext->decodeFrame(&(mCsd0[0]), mCsd0.size(), 0);
+            mContext->getImage();
+            mContext->decodeFrame(&(mCsd1[0]), mCsd1.size(), 0);
+            mContext->getImage();
+        }
         resetPlugin();
     } else {
         mInputOffset = 0;
@@ -305,6 +328,15 @@ void GoldfishAVCDec::onQueueFilled(OMX_U32 portIndex) {
             // TODO: We also need to send the timestamp
             h264_result_t h264Res = {(int)MediaH264Decoder::Err::NoErr, 0};
             if (inHeader != nullptr) {
+                if (inHeader->nFlags & OMX_BUFFERFLAG_CODECCONFIG) { 
+                    unsigned long mysize = (inHeader->nFilledLen - mInputOffset);
+                    uint8_t* mydata = mInPBuffer;
+                    if (mCsd0.empty()) {
+                        mCsd0.assign(mydata, mydata + mysize);
+                    } else if (mCsd1.empty()) {
+                        mCsd1.assign(mydata, mydata + mysize);
+                    }
+                }
                 ALOGD("Decoding frame(sz=%lu)", (unsigned long)(inHeader->nFilledLen - mInputOffset));
                 h264Res = mContext->decodeFrame(mInPBuffer,
                                                 inHeader->nFilledLen - mInputOffset,
@@ -319,7 +351,9 @@ void GoldfishAVCDec::onQueueFilled(OMX_U32 portIndex) {
             h264_image_t img = mContext->getImage();
 
 
-            getVUIParams(img);
+            if (img.data != nullptr) {
+                getVUIParams(img);
+            }
 
             mTimeEnd = systemTime();
             /* Compute time taken for decode() */
@@ -341,12 +375,12 @@ void GoldfishAVCDec::onQueueFilled(OMX_U32 portIndex) {
                     ALOGD("handling port reset");
                     ALOGD("port resetting (img.width=%u, img.height=%u, mWidth=%u, mHeight=%u)",
                           img.width, img.height, mWidth, mHeight);
-                    resetDecoder();
+                    //resetDecoder();
                     resetPlugin();
 
-                mContext->destroyH264Context();
-                mContext.reset(new MediaH264Decoder());
-                mContext->initH264Context(mWidth,
+                //mContext->destroyH264Context();
+                //mContext.reset(new MediaH264Decoder());
+                mContext->resetH264Context(mWidth,
                               mHeight,
                               mWidth,
                               mHeight,
@@ -357,6 +391,18 @@ void GoldfishAVCDec::onQueueFilled(OMX_U32 portIndex) {
             }
 
             if (img.data != nullptr) {
+                int myWidth = img.width;
+                int myHeight = img.height;
+                if (myWidth != mWidth || myHeight != mHeight) {
+                    bool portWillReset = false;
+                    handlePortSettingsChange(&portWillReset, myWidth, myHeight);
+                    resetPlugin();
+                    mWidth = myWidth;
+                    mHeight = myHeight;
+                    if (portWillReset) {
+                        return;
+                    }
+                }
                 outHeader->nFilledLen =  (outputBufferWidth() * outputBufferHeight() * 3) / 2;
                 int myStride = outputBufferWidth();
                 for (int i=0; i < mHeight; ++i) {
@@ -398,9 +444,10 @@ void GoldfishAVCDec::onQueueFilled(OMX_U32 portIndex) {
                     notifyFillBufferDone(outHeader);
                     outHeader = NULL;
                     resetPlugin();
-                                    mContext->destroyH264Context();
-                mContext.reset(new MediaH264Decoder());
-                mContext->initH264Context(mWidth,
+
+                    //mContext->destroyH264Context();
+                //mContext.reset(new MediaH264Decoder());
+                    mContext->resetH264Context(mWidth,
                               mHeight,
                               mWidth,
                               mHeight,
