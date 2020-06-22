@@ -66,8 +66,7 @@ using goldfish_vk::VkEncoder;
 #include "QemuPipeStream.h"
 #include "TcpStream.h"
 #include "ThreadInfo.h"
-
-#include "gralloc_cb.h"
+#include <gralloc_cb_bp.h>
 
 #ifdef VIRTIO_GPU
 
@@ -615,6 +614,7 @@ ExtendedRCEncoderContext *HostConnection::rcEncoder()
         queryAndSetAsyncUnmapBuffer(m_rcEnc);
         queryAndSetVirtioGpuNext(m_rcEnc);
         queryHasSharedSlotsHostMemoryAllocator(m_rcEnc);
+        queryAndSetVulkanFreeMemorySync(m_rcEnc);
         if (m_processPipe) {
             m_processPipe->processPipeInit(m_connectionType, m_rcEnc);
         }
@@ -823,5 +823,12 @@ void HostConnection::queryHasSharedSlotsHostMemoryAllocator(ExtendedRCEncoderCon
     const std::string& glExtensions = queryGLExtensions(rcEnc);
     if (glExtensions.find(kHasSharedSlotsHostMemoryAllocator) != std::string::npos) {
         rcEnc->featureInfo()->hasSharedSlotsHostMemoryAllocator = true;
+    }
+}
+
+void HostConnection::queryAndSetVulkanFreeMemorySync(ExtendedRCEncoderContext *rcEnc) {
+    const std::string& glExtensions = queryGLExtensions(rcEnc);
+    if (glExtensions.find(kVulkanFreeMemorySync) != std::string::npos) {
+        rcEnc->featureInfo()->hasVulkanFreeMemorySync = true;
     }
 }

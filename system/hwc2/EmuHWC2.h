@@ -24,8 +24,10 @@
 #undef HWC2_USE_CPP11
 #include <utils/Thread.h>
 
+#include <android-base/unique_fd.h>
 #include <atomic>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <sstream>
@@ -36,8 +38,6 @@
 
 #include <cutils/native_handle.h>
 
-#include "cbmanager.h"
-#include "MiniFence.h"
 #include "HostConnection.h"
 
 namespace android {
@@ -126,17 +126,19 @@ private:
     // layer. This class is a container for these two.
     class FencedBuffer {
         public:
-            FencedBuffer() : mBuffer(nullptr), mFence(MiniFence::NO_FENCE) {}
+            FencedBuffer() : mBuffer(nullptr) {}
 
             void setBuffer(buffer_handle_t buffer) { mBuffer = buffer; }
-            void setFence(int fenceFd) { mFence = new MiniFence(fenceFd); }
+            void setFence(int fenceFd) {
+                mFence = std::make_shared<base::unique_fd>(fenceFd);
+            }
 
             buffer_handle_t getBuffer() const { return mBuffer; }
-            int getFence() const { return mFence->dup(); }
+            int getFence() const { return mFence ? dup(mFence->get()) : -1; }
 
         private:
             buffer_handle_t mBuffer;
-            sp<MiniFence> mFence;
+            std::shared_ptr<base::unique_fd> mFence;
     };
 
     typedef struct compose_layer {
@@ -258,7 +260,7 @@ private:
         // Read configs from PRIMARY Display
         int populatePrimaryConfigs(int width, int height, int dpiX, int dpiY);
         HWC2::Error populateSecondaryConfigs(uint32_t width, uint32_t height,
-                 uint32_t dpi);
+                 uint32_t dpi, uint32_t idx);
 
     private:
         void post(HostConnection *hostCon, ExtendedRCEncoderContext *rcEnc,
@@ -344,6 +346,7 @@ private:
         EmuHWC2& mDevice;
         // Display ID generator.
         static std::atomic<hwc2_display_t> sNextId;
+        static const uint32_t hostDisplayIdStart = 6;
         const hwc2_display_t mId;
         // emulator side displayId
         uint32_t mHostDisplayId;
@@ -467,7 +470,6 @@ private:
     const native_handle_t* allocateDisplayColorBuffer();
     void freeDisplayColorBuffer(const native_handle_t* h);
 
-    CbManager mCbManager;
     std::unordered_set<HWC2::Capability> mCapabilities;
 
     // These are potentially accessed from multiple threads, and are protected
