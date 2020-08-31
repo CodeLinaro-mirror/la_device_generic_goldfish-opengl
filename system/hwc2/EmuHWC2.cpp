@@ -47,13 +47,13 @@ static hwc2_function_pointer_t asFP(T function)
     return reinterpret_cast<hwc2_function_pointer_t>(function);
 }
 
-static HostConnection *sHostCon = nullptr;
+static std::unique_ptr<HostConnection> sHostCon;
 
 static HostConnection* createOrGetHostConnection() {
     if (!sHostCon) {
         sHostCon = HostConnection::createUnique();
     }
-    return sHostCon;
+    return sHostCon.get();
 }
 
 #define DEFINE_AND_VALIDATE_HOST_CONNECTION \
@@ -391,7 +391,7 @@ Error EmuHWC2::registerCallback(Callback descriptor,
     return Error::None;
 }
 
-const native_handle_t* EmuHWC2::allocateDisplayColorBuffer() {
+const native_handle_t* EmuHWC2::allocateDisplayColorBuffer(int width, int height) {
     const uint32_t layerCount = 1;
     const uint64_t graphicBufferId = 0; // not used
 
@@ -399,7 +399,7 @@ const native_handle_t* EmuHWC2::allocateDisplayColorBuffer() {
     uint32_t stride;
 
     if (GraphicBufferAllocator::get().allocate(
-        mDisplayWidth, mDisplayHeight,
+        width, height,
         PIXEL_FORMAT_RGBA_8888,
         layerCount,
         (GraphicBuffer::USAGE_HW_COMPOSER | GraphicBuffer::USAGE_HW_RENDER),
@@ -437,7 +437,7 @@ static int getVsyncPeriodFromProperty() {
 
 std::atomic<hwc2_display_t> EmuHWC2::Display::sNextId(0);
 
-EmuHWC2::Display::Display(EmuHWC2& device, DisplayType type)
+EmuHWC2::Display::Display(EmuHWC2& device, DisplayType type, int width, int height)
   : mDevice(device),
     mId(sNextId++),
     mHostDisplayId(0),
@@ -457,8 +457,8 @@ EmuHWC2::Display::Display(EmuHWC2& device, DisplayType type)
     mColorModes(),
     mSetColorTransform(false),
     mStateMutex() {
-        mVsyncThread.run("", -19 /* ANDROID_PRIORITY_URGENT_AUDIO */);
-        mTargetCb = device.allocateDisplayColorBuffer();
+        mVsyncThread.run("", ANDROID_PRIORITY_URGENT_DISPLAY);
+        mTargetCb = device.allocateDisplayColorBuffer(width, height);
 }
 
 EmuHWC2::Display::~Display() {
@@ -1338,13 +1338,13 @@ HWC2::Error EmuHWC2::Display::populateSecondaryConfigs(uint32_t width, uint32_t 
     newConfig->setAttribute(Attribute::DpiX, dpi*1000);
     newConfig->setAttribute(Attribute::DpiY, dpi*1000);
 
-    newConfig->setId(static_cast<hwc2_config_t>(mConfigs.size()));
+    int configId = mConfigs.size();
+    newConfig->setId(static_cast<hwc2_config_t>(configId));
     ALOGV("Found new secondary config %d: %s", (uint32_t)newConfig->getId(),
             newConfig->toString().c_str());
     mConfigs.emplace_back(std::move(newConfig));
 
-    // we need to reset these values after populatePrimaryConfigs()
-    mActiveConfig = mConfigs[0];
+    mActiveConfig = mConfigs[configId];
     mActiveColorMode = HAL_COLOR_MODE_NATIVE;
     mColorModes.emplace((android_color_mode_t)HAL_COLOR_MODE_NATIVE);
 
@@ -1628,7 +1628,8 @@ void EmuHWC2::populateCapabilities() {
 
 int EmuHWC2::populatePrimary() {
     int ret = 0;
-    auto display = std::make_shared<Display>(*this, HWC2::DisplayType::Physical);
+    auto display = std::make_shared<Display>(*this, HWC2::DisplayType::Physical,
+            mDisplayWidth, mDisplayHeight);
     ret = display->populatePrimaryConfigs(mDisplayWidth, mDisplayHeight,
                                           mDisplayDpiX, mDisplayDpiY);
     if (ret != 0) {
@@ -1693,7 +1694,7 @@ int EmuHWC2::populateSecondaryDisplays() {
         values.erase(values.begin(), values.begin() + 5);
 
         Error ret = Error::None;
-        auto display = std::make_shared<Display>(*this, HWC2::DisplayType::Physical);
+        auto display = std::make_shared<Display>(*this, HWC2::DisplayType::Physical, width, height);
         ret = display->populateSecondaryConfigs(width, height, dpi, idx++);
         if (ret != Error::None) {
             return -2;
