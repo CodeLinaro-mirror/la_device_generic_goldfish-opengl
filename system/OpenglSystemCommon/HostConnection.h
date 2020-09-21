@@ -30,6 +30,7 @@
 #include <utils/threads.h>
 #endif
 
+#include <memory>
 #include <string>
 
 class GLEncoder;
@@ -55,6 +56,7 @@ public:
     bool hasNativeSync() const { return m_featureInfo.syncImpl >= SYNC_IMPL_NATIVE_SYNC_V2; }
     bool hasNativeSyncV3() const { return m_featureInfo.syncImpl >= SYNC_IMPL_NATIVE_SYNC_V3; }
     bool hasNativeSyncV4() const { return m_featureInfo.syncImpl >= SYNC_IMPL_NATIVE_SYNC_V4; }
+    bool hasVirtioGpuNativeSync() const { return m_featureInfo.hasVirtioGpuNativeSync; }
     bool hasHostCompositionV1() const {
         return m_featureInfo.hostComposition == HOST_COMPOSITION_V1; }
     bool hasHostCompositionV2() const {
@@ -139,8 +141,8 @@ public:
     static HostConnection *getWithThreadInfo(EGLThreadInfo* tInfo);
     static void exit();
 
-    static HostConnection *createUnique();
-    static void teardownUnique(HostConnection* con);
+    static std::unique_ptr<HostConnection> createUnique();
+    HostConnection(const HostConnection&) = delete;
 
     ~HostConnection();
 
@@ -152,6 +154,12 @@ public:
     GL2Encoder *gl2Encoder();
     goldfish_vk::VkEncoder *vkEncoder();
     ExtendedRCEncoderContext *rcEncoder();
+
+    // Returns rendernode fd, in case the stream is virtio-gpu based.
+    // Otherwise, attempts to create a rendernode fd assuming
+    // virtio-gpu is available.
+    int getOrCreateRendernodeFd();
+
     ChecksumCalculator *checksumHelper() { return &m_checksumHelper; }
     Gralloc *grallocHelper() { return m_grallocHelper; }
 
@@ -180,7 +188,7 @@ public:
 private:
     // If the connection failed, |conn| is deleted.
     // Returns NULL if connection failed.
-    static HostConnection* connect(HostConnection* con);
+    static std::unique_ptr<HostConnection> connect();
 
     HostConnection();
     static gl_client_context_t  *s_getGLContext();
@@ -206,18 +214,23 @@ private:
     void queryAndSetVirtioGpuNext(ExtendedRCEncoderContext *rcEnc);
     void queryHasSharedSlotsHostMemoryAllocator(ExtendedRCEncoderContext *rcEnc);
     void queryAndSetVulkanFreeMemorySync(ExtendedRCEncoderContext *rcEnc);
+    void queryAndSetVirtioGpuNativeSync(ExtendedRCEncoderContext *rcEnc);
+    void queryAndSetVulkanShaderFloat16Int8Support(ExtendedRCEncoderContext *rcEnc);
+    void queryAndSetVulkanAsyncQueueSubmitSupport(ExtendedRCEncoderContext *rcEnc);
 
 private:
     HostConnectionType m_connectionType;
     GrallocType m_grallocType;
-    IOStream *m_stream;
-    GLEncoder   *m_glEnc;
-    GL2Encoder  *m_gl2Enc;
-    goldfish_vk::VkEncoder  *m_vkEnc;
-    ExtendedRCEncoderContext *m_rcEnc;
+
+    std::unique_ptr<IOStream> m_stream;
+    std::unique_ptr<GLEncoder> m_glEnc;
+    std::unique_ptr<GL2Encoder> m_gl2Enc;
+    std::unique_ptr<goldfish_vk::VkEncoder> m_vkEnc;
+    std::unique_ptr<ExtendedRCEncoderContext> m_rcEnc;
+
     ChecksumCalculator m_checksumHelper;
-    Gralloc *m_grallocHelper;
-    ProcessPipe *m_processPipe;
+    Gralloc* m_grallocHelper = nullptr;
+    ProcessPipe* m_processPipe = nullptr;
     std::string m_glExtensions;
     bool m_grallocOnly;
     bool m_noHostError;
@@ -226,6 +239,8 @@ private:
 #else
     mutable android::Mutex m_lock;
 #endif
+    int m_rendernodeFd;
+    bool m_rendernodeFdOwned;
 };
 
 #endif

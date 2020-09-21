@@ -53,6 +53,9 @@ extern "C" {
 	GLint rcSetColorBufferVulkanMode(uint32_t colorBuffer, uint32_t mode);
 	void rcReadColorBufferYUV(uint32_t colorbuffer, GLint x, GLint y, GLint width, GLint height, void* pixels, uint32_t pixels_size);
 	int rcIsSyncSignaled(uint64_t sync);
+	void rcCreateColorBufferWithHandle(uint32_t width, uint32_t height, GLenum internalFormat, uint32_t handle);
+	uint32_t rcCreateBuffer(uint32_t size);
+	void rcCloseBuffer(uint32_t buffer);
 };
 
 #ifndef GET_CONTEXT
@@ -347,5 +350,23 @@ int rcIsSyncSignaled(uint64_t sync)
 {
 	GET_CONTEXT;
 	return ctx->rcIsSyncSignaled(ctx, sync);
+}
+
+void rcCreateColorBufferWithHandle(uint32_t width, uint32_t height, GLenum internalFormat, uint32_t handle)
+{
+	GET_CONTEXT;
+	ctx->rcCreateColorBufferWithHandle(ctx, width, height, internalFormat, handle);
+}
+
+uint32_t rcCreateBuffer(uint32_t size)
+{
+	GET_CONTEXT;
+	return ctx->rcCreateBuffer(ctx, size);
+}
+
+void rcCloseBuffer(uint32_t buffer)
+{
+	GET_CONTEXT;
+	ctx->rcCloseBuffer(ctx, buffer);
 }
 
