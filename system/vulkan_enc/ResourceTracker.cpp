@@ -1882,6 +1882,26 @@ public:
                         image_constraints.pixel_format.type =
                             llcpp::fuchsia::sysmem::PixelFormatType::R8G8B8A8;
                         break;
+                    case VK_FORMAT_R8_UNORM:
+                    case VK_FORMAT_R8_UINT:
+                    case VK_FORMAT_R8_USCALED:
+                    case VK_FORMAT_R8_SNORM:
+                    case VK_FORMAT_R8_SINT:
+                    case VK_FORMAT_R8_SSCALED:
+                    case VK_FORMAT_R8_SRGB:
+                        image_constraints.pixel_format.type =
+                            llcpp::fuchsia::sysmem::PixelFormatType::R8;
+                        break;
+                    case VK_FORMAT_R8G8_UNORM:
+                    case VK_FORMAT_R8G8_UINT:
+                    case VK_FORMAT_R8G8_USCALED:
+                    case VK_FORMAT_R8G8_SNORM:
+                    case VK_FORMAT_R8G8_SINT:
+                    case VK_FORMAT_R8G8_SSCALED:
+                    case VK_FORMAT_R8G8_SRGB:
+                        image_constraints.pixel_format.type =
+                            llcpp::fuchsia::sysmem::PixelFormatType::R8G8;
+                        break;
                     default:
                         return VK_ERROR_FORMAT_NOT_SUPPORTED;
                 }
@@ -2571,6 +2591,25 @@ public:
                         case VK_FORMAT_R8G8B8A8_USCALED:
                             format = llcpp::fuchsia::hardware::goldfish::
                                 ColorBufferFormatType::RGBA;
+                            break;
+                        case VK_FORMAT_R8_UNORM:
+                        case VK_FORMAT_R8_UINT:
+                        case VK_FORMAT_R8_USCALED:
+                        case VK_FORMAT_R8_SNORM:
+                        case VK_FORMAT_R8_SINT:
+                        case VK_FORMAT_R8_SSCALED:
+                        case VK_FORMAT_R8_SRGB:
+                            format = llcpp::fuchsia::hardware::goldfish::ColorBufferFormatType::
+                                LUMINANCE;
+                            break;
+                        case VK_FORMAT_R8G8_UNORM:
+                        case VK_FORMAT_R8G8_UINT:
+                        case VK_FORMAT_R8G8_USCALED:
+                        case VK_FORMAT_R8G8_SNORM:
+                        case VK_FORMAT_R8G8_SINT:
+                        case VK_FORMAT_R8G8_SSCALED:
+                        case VK_FORMAT_R8G8_SRGB:
+                            format = llcpp::fuchsia::hardware::goldfish::ColorBufferFormatType::RG;
                             break;
                         default:
                             ALOGE("Unsupported format: %d",
@@ -4239,17 +4278,56 @@ public:
 
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
         if (exportSyncFd) {
+            if (mFeatureInfo->hasVirtioGpuNativeSync) {
+#if !defined(HOST_BUILD)
+                uint64_t hostFenceHandle = get_host_u64_VkSemaphore(*pSemaphore);
+                uint32_t hostFenceHandleLo = (uint32_t)hostFenceHandle;
+                uint32_t hostFenceHandleHi = (uint32_t)(hostFenceHandle >> 32);
 
-            ensureSyncDeviceFd();
+                uint64_t hostDeviceHandle = get_host_u64_VkDevice(device);
+                uint32_t hostDeviceHandleLo = (uint32_t)hostDeviceHandle;
+                uint32_t hostDeviceHandleHi = (uint32_t)(hostFenceHandle >> 32);
 
-            if (exportSyncFd) {
-                int syncFd = -1;
-                goldfish_sync_queue_work(
-                    mSyncDeviceFd,
-                    get_host_u64_VkSemaphore(*pSemaphore) /* the handle */,
-                    GOLDFISH_SYNC_VULKAN_SEMAPHORE_SYNC /* thread handle (doubling as type field) */,
-                    &syncFd);
-                info.syncFd = syncFd;
+                #define VIRTIO_GPU_NATIVE_SYNC_VULKAN_CREATE_EXPORT_FD 0xa000
+
+                uint32_t cmdDwords[5] = {
+                    VIRTIO_GPU_NATIVE_SYNC_VULKAN_CREATE_EXPORT_FD,
+                    hostDeviceHandleLo,
+                    hostDeviceHandleHi,
+                    hostFenceHandleLo,
+                    hostFenceHandleHi,
+                };
+
+                drm_virtgpu_execbuffer execbuffer = {
+                    .flags = VIRTGPU_EXECBUF_FENCE_FD_OUT,
+                    .size = 5 * sizeof(uint32_t),
+                    .command = (uint64_t)(cmdDwords),
+                    .bo_handles = 0,
+                    .num_bo_handles = 0,
+                    .fence_fd = -1,
+                };
+
+                int res = drmIoctl(mRendernodeFd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &execbuffer);
+                if (res) {
+                    ALOGE("%s: Failed to virtgpu execbuffer: sterror: %s errno: %d\n", __func__,
+                            strerror(errno), errno);
+                    abort();
+                }
+
+                info.syncFd = execbuffer.fence_fd;
+#endif
+            } else {
+                ensureSyncDeviceFd();
+
+                if (exportSyncFd) {
+                    int syncFd = -1;
+                    goldfish_sync_queue_work(
+                            mSyncDeviceFd,
+                            get_host_u64_VkSemaphore(*pSemaphore) /* the handle */,
+                            GOLDFISH_SYNC_VULKAN_SEMAPHORE_SYNC /* thread handle (doubling as type field) */,
+                            &syncFd);
+                    info.syncFd = syncFd;
+                }
             }
         }
 #endif
@@ -4875,6 +4953,20 @@ public:
             VK_FORMAT_R8G8B8A8_SNORM,
             VK_FORMAT_R8G8B8A8_SSCALED,
             VK_FORMAT_R8G8B8A8_USCALED,
+            VK_FORMAT_R8_UNORM,
+            VK_FORMAT_R8_UINT,
+            VK_FORMAT_R8_USCALED,
+            VK_FORMAT_R8_SNORM,
+            VK_FORMAT_R8_SINT,
+            VK_FORMAT_R8_SSCALED,
+            VK_FORMAT_R8_SRGB,
+            VK_FORMAT_R8G8_UNORM,
+            VK_FORMAT_R8G8_UINT,
+            VK_FORMAT_R8G8_USCALED,
+            VK_FORMAT_R8G8_SNORM,
+            VK_FORMAT_R8G8_SINT,
+            VK_FORMAT_R8G8_SSCALED,
+            VK_FORMAT_R8G8_SRGB,
         };
 
         VkExternalImageFormatProperties* ext_img_properties =
@@ -4905,6 +4997,17 @@ public:
         }
 
         if (hostRes != VK_SUCCESS) return hostRes;
+
+#ifdef VK_USE_PLATFORM_FUCHSIA
+        if (ext_img_properties) {
+            ext_img_properties->externalMemoryProperties = {
+                .externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT |
+                                          VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
+                .exportFromImportedHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
+                .compatibleHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
+            };
+        }
+#endif
 
         if (output_ahw_usage) {
             output_ahw_usage->androidHardwareBufferUsage =
