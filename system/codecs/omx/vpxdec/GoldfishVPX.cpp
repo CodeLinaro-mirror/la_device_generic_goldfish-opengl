@@ -456,11 +456,14 @@ OMX_ERRORTYPE GoldfishVPX::internalSetParameter(OMX_INDEXTYPE index,
                     "handle %d "
                     "calling usebuffer",
                     handle, handle->hostHandle);
-                useBufferCallerLockedAlready(use_buffer_params->bufferHeader,
+                OMX_ERRORTYPE retval = useBufferCallerLockedAlready(use_buffer_params->bufferHeader,
                                              use_buffer_params->nPortIndex,
                                              use_buffer_params->pAppPrivate,
                                              handle->allocatedSize(),
                                              (OMX_U8*)dst);
+                if (retval != OMX_ErrorNone) {
+                    return retval;
+                }
                 mNWBuffers[*(use_buffer_params->bufferHeader)] =
                         use_buffer_params->nativeBuffer;
                 ;
