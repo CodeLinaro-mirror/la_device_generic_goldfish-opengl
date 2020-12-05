@@ -809,6 +809,14 @@ public:
             mSysmemAllocator =
                 std::make_unique<llcpp::fuchsia::sysmem::Allocator::SyncClient>(
                     std::move(sysmem_channel));
+            char name[ZX_MAX_NAME_LEN] = {};
+            zx_object_get_property(zx_process_self(), ZX_PROP_NAME, name, sizeof(name));
+            std::string client_name(name);
+            client_name += "-goldfish";
+            zx_info_handle_basic_t info;
+            zx_object_get_info(zx_process_self(), ZX_INFO_HANDLE_BASIC, &info, sizeof(info),
+                               nullptr, nullptr);
+            mSysmemAllocator->SetDebugClientInfo(fidl::unowned_str(client_name), info.koid);
         }
 #endif
 
@@ -1192,7 +1200,7 @@ public:
             getHostDeviceExtensionIndex(
                 "VK_KHR_external_memory_fd") != -1;
         bool moltenVkExtAvailable =
-            getHostInstanceExtensionIndex(
+            getHostDeviceExtensionIndex(
                 "VK_MVK_moltenvk") != -1;
 
         bool hostHasExternalMemorySupport =
@@ -2127,6 +2135,7 @@ public:
                 uint64_t hvaSizeId[3];
 
                 int rendernodeFdForMem = drmOpenRender(128 /* RENDERNODE_MINOR */);
+                ALOGE("%s: render fd = %d\n", __func__, rendernodeFdForMem);
 
                 mLock.unlock();
                 enc->vkGetMemoryHostAddressInfoGOOGLE(
@@ -2172,12 +2181,14 @@ public:
                     abort();
                 }
 
+                hostMemAlloc.memoryAddr = directMappedAddr;
+                hostMemAlloc.memorySize = hvaSizeId[1];
+
                 // add the host's page offset
                 directMappedAddr += (uint64_t)(uintptr_t)(hvaSizeId[0]) & (PAGE_SIZE - 1);
 				directMapResult = VK_SUCCESS;
 
                 hostMemAlloc.fd = rendernodeFdForMem;
-
 #endif // VK_USE_PLATFORM_ANDROID_KHR
             }
 
