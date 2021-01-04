@@ -63,6 +63,15 @@ typedef int (renderControl_APIENTRY *rcIsSyncSignaled_client_proc_t) (void * ctx
 typedef void (renderControl_APIENTRY *rcCreateColorBufferWithHandle_client_proc_t) (void * ctx, uint32_t, uint32_t, GLenum, uint32_t);
 typedef uint32_t (renderControl_APIENTRY *rcCreateBuffer_client_proc_t) (void * ctx, uint32_t);
 typedef void (renderControl_APIENTRY *rcCloseBuffer_client_proc_t) (void * ctx, uint32_t);
+typedef GLint (renderControl_APIENTRY *rcSetColorBufferVulkanMode2_client_proc_t) (void * ctx, uint32_t, uint32_t, uint32_t);
+typedef int (renderControl_APIENTRY *rcMapGpaToBufferHandle_client_proc_t) (void * ctx, uint32_t, uint64_t);
+typedef uint32_t (renderControl_APIENTRY *rcCreateBuffer2_client_proc_t) (void * ctx, uint64_t, uint32_t);
+typedef int (renderControl_APIENTRY *rcMapGpaToBufferHandle2_client_proc_t) (void * ctx, uint32_t, uint64_t, uint64_t);
+typedef void (renderControl_APIENTRY *rcFlushWindowColorBufferAsyncWithFrameNumber_client_proc_t) (void * ctx, uint32_t, uint32_t);
+typedef void (renderControl_APIENTRY *rcSetTracingForPuid_client_proc_t) (void * ctx, uint64_t, uint32_t, uint64_t);
+typedef void (renderControl_APIENTRY *rcMakeCurrentAsync_client_proc_t) (void * ctx, uint32_t, uint32_t, uint32_t);
+typedef void (renderControl_APIENTRY *rcComposeAsync_client_proc_t) (void * ctx, uint32_t, void*);
+typedef void (renderControl_APIENTRY *rcDestroySyncKHRAsync_client_proc_t) (void * ctx, uint64_t);
 
 
 #endif

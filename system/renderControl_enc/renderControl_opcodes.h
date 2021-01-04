@@ -54,7 +54,16 @@
 #define OP_rcCreateColorBufferWithHandle 					10048
 #define OP_rcCreateBuffer 					10049
 #define OP_rcCloseBuffer 					10050
-#define OP_last 					10051
+#define OP_rcSetColorBufferVulkanMode2 					10051
+#define OP_rcMapGpaToBufferHandle 					10052
+#define OP_rcCreateBuffer2 					10053
+#define OP_rcMapGpaToBufferHandle2 					10054
+#define OP_rcFlushWindowColorBufferAsyncWithFrameNumber 					10055
+#define OP_rcSetTracingForPuid 					10056
+#define OP_rcMakeCurrentAsync 					10057
+#define OP_rcComposeAsync 					10058
+#define OP_rcDestroySyncKHRAsync 					10059
+#define OP_last 					10060
 
 
 #endif

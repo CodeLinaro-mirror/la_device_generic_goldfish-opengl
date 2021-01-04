@@ -14,6 +14,11 @@
 * limitations under the License.
 */
 
+#ifdef GFXSTREAM
+#include <atomic>
+#include <time.h>
+#endif
+
 #include <assert.h>
 #include "HostConnection.h"
 #include "ThreadInfo.h"
@@ -48,6 +53,11 @@
 #include <xf86drm.h>
 #include <poll.h>
 #endif // VIRTIO_GPU
+
+#ifdef GFXSTREAM
+#include "android/base/Tracing.h"
+#endif
+#include <cutils/trace.h>
 
 #if PLATFORM_SDK_VERSION < 18
 #define override
@@ -611,6 +621,68 @@ static void createGoldfishOpenGLNativeSync(int* fd_out) {
                      fd_out);
 }
 
+uint64_t currGuestTimeNs() {
+    struct timespec ts;
+#ifdef __APPLE__
+    clock_gettime(CLOCK_REALTIME, &ts);
+#else
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+#endif
+    uint64_t res = (uint64_t)(ts.tv_sec * 1000000000ULL + ts.tv_nsec);
+    return res;
+}
+
+struct FrameTracingState {
+    uint32_t frameNumber = 0;
+    bool tracingEnabled = false;
+    void onSwapBuffersSuccesful(ExtendedRCEncoderContext* rcEnc) {
+#ifdef GFXSTREAM
+        bool current = android::base::isTracingEnabled();
+        // edge trigger
+        if (android::base::isTracingEnabled() && !tracingEnabled) {
+            if (rcEnc->hasHostSideTracing()) {
+                rcEnc->rcSetTracingForPuid(rcEnc, getPuid(), 1, currGuestTimeNs());
+            }
+        }
+        if (!android::base::isTracingEnabled() && tracingEnabled) {
+            if (rcEnc->hasHostSideTracing()) {
+                rcEnc->rcSetTracingForPuid(rcEnc, getPuid(), 0, currGuestTimeNs());
+            }
+        }
+        tracingEnabled = android::base::isTracingEnabled();
+#endif
+        ++frameNumber;
+    }
+};
+
+static FrameTracingState sFrameTracingState;
+
+static void sFlushBufferAndCreateFence(
+    HostConnection* hostCon, ExtendedRCEncoderContext* rcEnc, uint32_t rcSurface, uint32_t frameNumber, int* presentFenceFd) {
+    atrace_int(ATRACE_TAG_GRAPHICS, "gfxstreamFrameNumber", (int32_t)frameNumber);
+
+    if (rcEnc->hasHostSideTracing()) {
+        rcEnc->rcFlushWindowColorBufferAsyncWithFrameNumber(rcEnc, rcSurface, frameNumber);
+    } else {
+        rcEnc->rcFlushWindowColorBufferAsync(rcEnc, rcSurface);
+    }
+
+    if (rcEnc->hasVirtioGpuNativeSync()) {
+        createNativeSync_virtioGpu(EGL_SYNC_NATIVE_FENCE_ANDROID,
+                     NULL /* empty attrib list */,
+                     0 /* 0 attrib count */,
+                     true /* destroy when signaled. this is host-only
+                             and there will only be one waiter */,
+                     -1 /* we want a new fd */,
+                     presentFenceFd);
+    } else if (rcEnc->hasNativeSync()) {
+        createGoldfishOpenGLNativeSync(presentFenceFd);
+    } else {
+        // equivalent to glFinish if no native sync
+        eglWaitClient();
+    }
+}
+
 EGLBoolean egl_window_surface_t::swapBuffers()
 {
 
@@ -645,23 +717,9 @@ EGLBoolean egl_window_surface_t::swapBuffers()
     eglWaitClient();
     nativeWindow->queueBuffer(nativeWindow, buffer);
 #else
-    if (rcEnc->hasVirtioGpuNativeSync()) {
-        rcEnc->rcFlushWindowColorBufferAsync(rcEnc, rcSurface);
-        createNativeSync_virtioGpu(EGL_SYNC_NATIVE_FENCE_ANDROID,
-                     NULL /* empty attrib list */,
-                     0 /* 0 attrib count */,
-                     true /* destroy when signaled. this is host-only
-                             and there will only be one waiter */,
-                     -1 /* we want a new fd */,
-                     &presentFenceFd);
-    } else if (rcEnc->hasNativeSync()) {
-        rcEnc->rcFlushWindowColorBufferAsync(rcEnc, rcSurface);
-        createGoldfishOpenGLNativeSync(&presentFenceFd);
-    } else {
-        rcEnc->rcFlushWindowColorBuffer(rcEnc, rcSurface);
-        // equivalent to glFinish if no native sync
-        eglWaitClient();
-    }
+    sFlushBufferAndCreateFence(
+        hostCon, rcEnc, rcSurface,
+        sFrameTracingState.frameNumber, &presentFenceFd);
 
     DPRINT("queueBuffer with fence %d", presentFenceFd);
     nativeWindow->queueBuffer(nativeWindow, buffer, presentFenceFd);
@@ -694,6 +752,7 @@ EGLBoolean egl_window_surface_t::swapBuffers()
     setWidth(buffer->width);
     setHeight(buffer->height);
 
+    sFrameTracingState.onSwapBuffersSuccesful(rcEnc);
     return EGL_TRUE;
 }
 
@@ -836,6 +895,10 @@ static std::vector<std::string> getExtStringArray() {
         return res;
     }
 
+    if (tInfo->currentContext->extensionStringArray.size() > 0) {
+        return tInfo->currentContext->extensionStringArray;
+    }
+
 #define GL_EXTENSIONS                     0x1F03
 
     DEFINE_AND_VALIDATE_HOST_CONNECTION(res);
@@ -850,6 +913,7 @@ static std::vector<std::string> getExtStringArray() {
             hostStr = NULL;
         }
     }
+
     // push guest strings
     res.push_back("GL_EXT_robustness");
 
@@ -875,6 +939,8 @@ static std::vector<std::string> getExtStringArray() {
         }
         extEnd++;
     }
+
+    tInfo->currentContext->extensionStringArray = res;
 
     delete [] hostStr;
     return res;
@@ -915,6 +981,10 @@ static const char *getGLString(int glEnum)
 
     if (!strPtr) {
         return NULL;
+    }
+
+    if (*strPtr) {
+        return *strPtr;
     }
 
     char* hostStr = NULL;
@@ -1003,6 +1073,8 @@ EGLBoolean eglTerminate(EGLDisplay dpy)
     VALIDATE_DISPLAY_INIT(dpy, EGL_FALSE);
 
     s_display.terminate();
+    DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_FALSE);
+    rcEnc->rcGetRendererVersion(rcEnc);
     return EGL_TRUE;
 }
 
@@ -1820,9 +1892,10 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
     }
 
     DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_FALSE);
-    if (rcEnc->rcMakeCurrent(rcEnc, ctxHandle, drawHandle, readHandle) == EGL_FALSE) {
-        ALOGE("rcMakeCurrent returned EGL_FALSE");
-        setErrorReturn(EGL_BAD_CONTEXT, EGL_FALSE);
+    if (rcEnc->hasAsyncFrameCommands()) {
+        rcEnc->rcMakeCurrentAsync(rcEnc, ctxHandle, drawHandle, readHandle);
+    } else {
+        rcEnc->rcMakeCurrent(rcEnc, ctxHandle, drawHandle, readHandle);
     }
 
     //Now make the local bind
@@ -1859,41 +1932,25 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
                 context->minorVersion,
                 context->deviceMajorVersion,
                 context->deviceMinorVersion);
-            // Get caps for indexed buffers from host.
-            // Some need a current context.
-            int max_transform_feedback_separate_attribs = 0;
-            int max_uniform_buffer_bindings = 0;
-            int max_atomic_counter_buffer_bindings = 0;
-            int max_shader_storage_buffer_bindings = 0;
-            int max_vertex_attrib_bindings = 0;
-            int max_color_attachments = 1;
-            int max_draw_buffers = 1;
-            if (context->majorVersion > 2) {
-                s_display.gles2_iface()->getIntegerv(
-                        GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS, &max_transform_feedback_separate_attribs);
-                s_display.gles2_iface()->getIntegerv(
-                        GL_MAX_UNIFORM_BUFFER_BINDINGS, &max_uniform_buffer_bindings);
-                if (context->minorVersion > 0) {
-                    s_display.gles2_iface()->getIntegerv(
-                            GL_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS, &max_atomic_counter_buffer_bindings);
-                    s_display.gles2_iface()->getIntegerv(
-                            GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &max_shader_storage_buffer_bindings);
-                    s_display.gles2_iface()->getIntegerv(
-                            GL_MAX_VERTEX_ATTRIB_BINDINGS, &max_vertex_attrib_bindings);
-                }
-                s_display.gles2_iface()->getIntegerv(
-                        GL_MAX_COLOR_ATTACHMENTS, &max_color_attachments);
-                s_display.gles2_iface()->getIntegerv(
-                        GL_MAX_DRAW_BUFFERS, &max_draw_buffers);
+            hostCon->gl2Encoder()->setClientState(contextState);
+            if (context->majorVersion > 1) {
+                HostDriverCaps caps = s_display.getHostDriverCaps(
+                    context->majorVersion,
+                    context->minorVersion);
+                contextState->initFromCaps(caps);
+            } else {
+                // Just put some stuff here to make gles1 happy
+                HostDriverCaps gles1Caps = {
+                    .max_vertex_attribs = 16,
+                    .max_combined_texture_image_units = 8,
+                    .max_color_attachments = 8,
+
+                    .max_texture_size = 4096,
+                    .max_texture_size_cube_map = 2048,
+                    .max_renderbuffer_size = 4096,
+                };
+                contextState->initFromCaps(gles1Caps);
             }
-            contextState->initFromCaps(
-                    max_transform_feedback_separate_attribs,
-                    max_uniform_buffer_bindings,
-                    max_atomic_counter_buffer_bindings,
-                    max_shader_storage_buffer_bindings,
-                    max_vertex_attrib_bindings,
-                    max_color_attachments,
-                    max_draw_buffers);
         }
 
         // update the client state, share group, and version
@@ -1937,7 +1994,7 @@ EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLC
 
     //Check maybe we need to init the encoder, if it's first eglMakeCurrent
     if (tInfo->currentContext) {
-        if (tInfo->currentContext->majorVersion  > 1) {
+        if (tInfo->currentContext->majorVersion > 1) {
             if (!hostCon->gl2Encoder()->isInitialized()) {
                 s_display.gles2_iface()->init();
                 hostCon->gl2Encoder()->setInitialized();
@@ -2339,7 +2396,11 @@ EGLBoolean eglDestroySyncKHR(EGLDisplay dpy, EGLSyncKHR eglsync)
     if (sync) {
         DEFINE_HOST_CONNECTION;
         if (rcEnc->hasVirtioGpuNativeSync() || rcEnc->hasNativeSync()) {
-            rcEnc->rcDestroySyncKHR(rcEnc, sync->handle);
+            if (rcEnc->hasAsyncFrameCommands()) {
+                rcEnc->rcDestroySyncKHRAsync(rcEnc, sync->handle);
+            } else {
+                rcEnc->rcDestroySyncKHR(rcEnc, sync->handle);
+            }
         }
         delete sync;
     }

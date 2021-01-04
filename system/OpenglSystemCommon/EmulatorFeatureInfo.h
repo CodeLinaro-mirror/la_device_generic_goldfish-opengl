@@ -114,6 +114,15 @@ static const char kVulkanShaderFloat16Int8[] = "ANDROID_EMU_vulkan_shader_float1
 // Vulkan async queue submit
 static const char kVulkanAsyncQueueSubmit[] = "ANDROID_EMU_vulkan_async_queue_submit";
 
+// A flag to _not_ ignore host opengl errors (now host opengl errors are ignored by default)
+static const char kGLESUseHostError[] = "ANDROID_EMU_gles_use_host_error";
+
+// Host side tracing
+static const char kHostSideTracing[] = "ANDROID_EMU_host_side_tracing";
+
+// Make current async
+static const char kAsyncFrameCommands[] = "ANDROID_EMU_async_frame_commands";
+
 // Struct describing available emulator features
 struct EmulatorFeatureInfo {
 
@@ -135,7 +144,9 @@ struct EmulatorFeatureInfo {
         hasVulkanFreeMemorySync(false),
         hasVirtioGpuNativeSync(false),
         hasVulkanShaderFloat16Int8(false),
-        hasVulkanAsyncQueueSubmit(false)
+        hasVulkanAsyncQueueSubmit(false),
+        hasHostSideTracing(false),
+        hasAsyncFrameCommands(false)
     { }
 
     SyncImpl syncImpl;
@@ -156,6 +167,8 @@ struct EmulatorFeatureInfo {
     bool hasVirtioGpuNativeSync;
     bool hasVulkanShaderFloat16Int8;
     bool hasVulkanAsyncQueueSubmit;
+    bool hasHostSideTracing;
+    bool hasAsyncFrameCommands;
 };
 
 enum HostConnectionType {

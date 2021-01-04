@@ -56,6 +56,15 @@ extern "C" {
 	void rcCreateColorBufferWithHandle(uint32_t width, uint32_t height, GLenum internalFormat, uint32_t handle);
 	uint32_t rcCreateBuffer(uint32_t size);
 	void rcCloseBuffer(uint32_t buffer);
+	GLint rcSetColorBufferVulkanMode2(uint32_t colorBuffer, uint32_t mode, uint32_t memoryProperty);
+	int rcMapGpaToBufferHandle(uint32_t bufferHandle, uint64_t gpa);
+	uint32_t rcCreateBuffer2(uint64_t size, uint32_t memoryProperty);
+	int rcMapGpaToBufferHandle2(uint32_t bufferHandle, uint64_t gpa, uint64_t size);
+	void rcFlushWindowColorBufferAsyncWithFrameNumber(uint32_t windowSurface, uint32_t frameNumber);
+	void rcSetTracingForPuid(uint64_t puid, uint32_t enable, uint64_t guestTime);
+	void rcMakeCurrentAsync(uint32_t context, uint32_t drawSurf, uint32_t readSurf);
+	void rcComposeAsync(uint32_t bufferSize, void* buffer);
+	void rcDestroySyncKHRAsync(uint64_t sync);
 };
 
 #ifndef GET_CONTEXT
@@ -368,5 +377,59 @@ void rcCloseBuffer(uint32_t buffer)
 {
 	GET_CONTEXT;
 	ctx->rcCloseBuffer(ctx, buffer);
+}
+
+GLint rcSetColorBufferVulkanMode2(uint32_t colorBuffer, uint32_t mode, uint32_t memoryProperty)
+{
+	GET_CONTEXT;
+	return ctx->rcSetColorBufferVulkanMode2(ctx, colorBuffer, mode, memoryProperty);
+}
+
+int rcMapGpaToBufferHandle(uint32_t bufferHandle, uint64_t gpa)
+{
+	GET_CONTEXT;
+	return ctx->rcMapGpaToBufferHandle(ctx, bufferHandle, gpa);
+}
+
+uint32_t rcCreateBuffer2(uint64_t size, uint32_t memoryProperty)
+{
+	GET_CONTEXT;
+	return ctx->rcCreateBuffer2(ctx, size, memoryProperty);
+}
+
+int rcMapGpaToBufferHandle2(uint32_t bufferHandle, uint64_t gpa, uint64_t size)
+{
+	GET_CONTEXT;
+	return ctx->rcMapGpaToBufferHandle2(ctx, bufferHandle, gpa, size);
+}
+
+void rcFlushWindowColorBufferAsyncWithFrameNumber(uint32_t windowSurface, uint32_t frameNumber)
+{
+	GET_CONTEXT;
+	ctx->rcFlushWindowColorBufferAsyncWithFrameNumber(ctx, windowSurface, frameNumber);
+}
+
+void rcSetTracingForPuid(uint64_t puid, uint32_t enable, uint64_t guestTime)
+{
+	GET_CONTEXT;
+	ctx->rcSetTracingForPuid(ctx, puid, enable, guestTime);
+}
+
+void rcMakeCurrentAsync(uint32_t context, uint32_t drawSurf, uint32_t readSurf)
+{
+	GET_CONTEXT;
+	ctx->rcMakeCurrentAsync(ctx, context, drawSurf, readSurf);
+}
+
+void rcComposeAsync(uint32_t bufferSize, void* buffer)
+{
+	GET_CONTEXT;
+	ctx->rcComposeAsync(ctx, bufferSize, buffer);
+}
+
+void rcDestroySyncKHRAsync(uint64_t sync)
+{
+	GET_CONTEXT;
+	ctx->rcDestroySyncKHRAsync(ctx, sync);
 }
 

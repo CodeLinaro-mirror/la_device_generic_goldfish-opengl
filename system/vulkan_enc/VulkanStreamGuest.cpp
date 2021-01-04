@@ -16,7 +16,7 @@
 #include "IOStream.h"
 #include "ResourceTracker.h"
 
-#include "android/base/Pool.h"
+#include "android/base/BumpPool.h"
 #include "android/base/Tracing.h"
 
 #include <vector>
@@ -84,6 +84,14 @@ public:
         return mFeatureBits;
     }
 
+    void incStreamRef() {
+        mStream->incRef();
+    }
+
+    bool decStreamRef() {
+        return mStream->decRef();
+    }
+
 private:
     size_t oustandingWriteBuffer() const {
         return mWritePos;
@@ -107,7 +115,7 @@ private:
         return size;
     }
 
-    android::base::Pool mPool { 8, 4096, 64 };
+    android::base::BumpPool mPool;
 
     size_t mWritePos = 0;
     std::vector<uint8_t> mWriteBuffer;
@@ -188,6 +196,14 @@ void VulkanStreamGuest::flush() {
 
 uint32_t VulkanStreamGuest::getFeatureBits() const {
     return mImpl->getFeatureBits();
+}
+
+void VulkanStreamGuest::incStreamRef() {
+    mImpl->incStreamRef();
+}
+
+bool VulkanStreamGuest::decStreamRef() {
+    return mImpl->decStreamRef();
 }
 
 VulkanCountingStream::VulkanCountingStream() : VulkanStreamGuest(nullptr) { }
