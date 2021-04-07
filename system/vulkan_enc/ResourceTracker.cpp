@@ -1145,6 +1145,7 @@ public:
         VkExternalMemoryHandleTypeFlags supportedHandleType = 0u;
 #ifdef VK_USE_PLATFORM_FUCHSIA
         supportedHandleType |=
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA |
             VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA;
 #endif  // VK_USE_PLATFORM_FUCHSIA
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
@@ -1743,7 +1744,8 @@ public:
         using fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_DEVICE_LOCAL;
         using fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_HOST_VISIBLE;
 
-        if (handleType != VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA) {
+        if (handleType != VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA &&
+            handleType != VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA) {
             return VK_ERROR_INITIALIZATION_FAILED;
         }
 
@@ -3024,6 +3026,11 @@ public:
 
         const VkImportMemoryZirconHandleInfoFUCHSIA* importVmoInfoPtr =
             vk_find_struct<VkImportMemoryZirconHandleInfoFUCHSIA>(pAllocateInfo);
+        if (!importVmoInfoPtr) {
+            importVmoInfoPtr = reinterpret_cast<const VkImportMemoryZirconHandleInfoFUCHSIA*>(
+                __vk_find_struct(const_cast<void*>(pAllocateInfo->pNext),
+                    VK_STRUCTURE_TYPE_TEMP_IMPORT_MEMORY_ZIRCON_HANDLE_INFO_FUCHSIA));
+        }
 
         const VkMemoryDedicatedAllocateInfo* dedicatedAllocInfoPtr =
             vk_find_struct<VkMemoryDedicatedAllocateInfo>(pAllocateInfo);
@@ -3080,8 +3087,10 @@ public:
                 exportAllocateInfoPtr->handleTypes &
                 VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
             exportVmo =
-                exportAllocateInfoPtr->handleTypes &
-                VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA;
+                (exportAllocateInfoPtr->handleTypes &
+                    VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA) ||
+                (exportAllocateInfoPtr->handleTypes &
+                    VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA);
         } else if (importAhbInfoPtr) {
             importAhb = true;
         } else if (importBufferCollectionInfoPtr) {
@@ -3402,25 +3411,14 @@ public:
                                 abort();
                         }
 
-                        auto createParams =
-                            fuchsia_hardware_goldfish::wire::
-                                CreateColorBuffer2Params::Builder(
-                                    std::make_unique<
-                                        fuchsia_hardware_goldfish::wire::
-                                            CreateColorBuffer2Params::Frame>())
-                                    .set_width(std::make_unique<uint32_t>(
-                                        pImageCreateInfo->extent.width))
-                                    .set_height(std::make_unique<uint32_t>(
-                                        pImageCreateInfo->extent.height))
-                                    .set_format(
-                                        std::make_unique<
-                                            fuchsia_hardware_goldfish::wire::
-                                                ColorBufferFormatType>(format))
-                                    .set_memory_property(
-                                        std::make_unique<uint32_t>(
-                                            fuchsia_hardware_goldfish::wire::
-                                                MEMORY_PROPERTY_DEVICE_LOCAL))
-                                    .build();
+                        fidl::FidlAllocator allocator;
+                        fuchsia_hardware_goldfish::wire::CreateColorBuffer2Params createParams(
+                            allocator);
+                        createParams.set_width(allocator, pImageCreateInfo->extent.width)
+                            .set_height(allocator, pImageCreateInfo->extent.height)
+                            .set_format(allocator, format)
+                            .set_memory_property(allocator,
+                                fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_DEVICE_LOCAL);
 
                         auto result = mControlDevice->CreateColorBuffer2(
                             std::move(vmo_copy), std::move(createParams));
@@ -3441,15 +3439,12 @@ public:
                 }
 
                 if (pBufferConstraintsInfo) {
-                    auto createParams =
-                        fuchsia_hardware_goldfish::wire::CreateBuffer2Params::Builder(
-                            std::make_unique<
-                                fuchsia_hardware_goldfish::wire::CreateBuffer2Params::Frame>())
-                            .set_size(std::make_unique<uint64_t>(
-                                pBufferConstraintsInfo->pBufferCreateInfo->size))
-                            .set_memory_property(std::make_unique<uint32_t>(
-                                fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_DEVICE_LOCAL))
-                            .build();
+                    fidl::FidlAllocator allocator;
+                    fuchsia_hardware_goldfish::wire::CreateBuffer2Params createParams(allocator);
+                    createParams.set_size(allocator,
+                            pBufferConstraintsInfo->pBufferCreateInfo->size)
+                        .set_memory_property(allocator,
+                            fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_DEVICE_LOCAL);
 
                     auto result =
                         mControlDevice->CreateBuffer2(std::move(vmo_copy), std::move(createParams));
@@ -3913,8 +3908,10 @@ public:
         bool isSysmemBackedMemory = false;
 
         if (extImgCiPtr &&
+            ((extImgCiPtr->handleTypes &
+                VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA) ||
             (extImgCiPtr->handleTypes &
-             VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA)) {
+                VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA))) {
             isSysmemBackedMemory = true;
         }
 
@@ -3975,19 +3972,15 @@ public:
                             ? fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_DEVICE_LOCAL
                             : fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_HOST_VISIBLE;
 
-                    auto createParams =
-                        fuchsia_hardware_goldfish::wire::CreateColorBuffer2Params::Builder(
-                            std::make_unique<fuchsia_hardware_goldfish::wire::
-                                                 CreateColorBuffer2Params::Frame>())
-                            .set_width(std::make_unique<uint32_t>(
-                                info.settings.image_format_constraints.min_coded_width))
-                            .set_height(std::make_unique<uint32_t>(
-                                info.settings.image_format_constraints.min_coded_height))
-                            .set_format(std::make_unique<
-                                        fuchsia_hardware_goldfish::wire::ColorBufferFormatType>(
-                                format))
-                            .set_memory_property(std::make_unique<uint32_t>(memory_property))
-                            .build();
+                    fidl::FidlAllocator allocator;
+                    fuchsia_hardware_goldfish::wire::CreateColorBuffer2Params createParams(
+                        allocator);
+                    createParams.set_width(allocator,
+                            info.settings.image_format_constraints.min_coded_width)
+                        .set_height(allocator,
+                            info.settings.image_format_constraints.min_coded_height)
+                        .set_format(allocator, format)
+                        .set_memory_property(allocator, memory_property);
 
                     auto result =
                         mControlDevice->CreateColorBuffer2(std::move(vmo), std::move(createParams));
@@ -4936,8 +4929,10 @@ public:
         const VkExternalMemoryBufferCreateInfo* extBufCiPtr =
             vk_find_struct<VkExternalMemoryBufferCreateInfo>(pCreateInfo);
         if (extBufCiPtr &&
+            ((extBufCiPtr->handleTypes &
+             VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA) ||
             (extBufCiPtr->handleTypes &
-             VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA)) {
+             VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA))) {
             isSysmemBackedMemory = true;
         }
 
@@ -4964,14 +4959,11 @@ public:
             }
 
             if (vmo && vmo->is_valid()) {
-                auto createParams =
-                    fuchsia_hardware_goldfish::wire::CreateBuffer2Params::Builder(
-                        std::make_unique<
-                            fuchsia_hardware_goldfish::wire::CreateBuffer2Params::Frame>())
-                        .set_size(std::make_unique<uint64_t>(pCreateInfo->size))
-                        .set_memory_property(std::make_unique<uint32_t>(
-                            fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_DEVICE_LOCAL))
-                        .build();
+                fidl::FidlAllocator allocator;
+                fuchsia_hardware_goldfish::wire::CreateBuffer2Params createParams(allocator);
+                createParams.set_size(allocator, pCreateInfo->size)
+                    .set_memory_property(allocator,
+                        fuchsia_hardware_goldfish::wire::MEMORY_PROPERTY_DEVICE_LOCAL);
 
                 auto result =
                     mControlDevice->CreateBuffer2(std::move(*vmo), std::move(createParams));
@@ -5138,8 +5130,10 @@ public:
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
         bool exportEvent = exportSemaphoreInfoPtr &&
+            ((exportSemaphoreInfoPtr->handleTypes &
+             VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA) ||
             (exportSemaphoreInfoPtr->handleTypes &
-             VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA);
+             VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_ZIRCON_EVENT_BIT_FUCHSIA));
 
         if (exportEvent) {
             finalCreateInfo.pNext = nullptr;
@@ -6247,12 +6241,32 @@ public:
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
         if (ext_img_properties) {
-            ext_img_properties->externalMemoryProperties = {
-                .externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT |
-                                          VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
-                .exportFromImportedHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
-                .compatibleHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
-            };
+            const VkPhysicalDeviceExternalImageFormatInfo* ext_img_info =
+                vk_find_struct<VkPhysicalDeviceExternalImageFormatInfo>(pImageFormatInfo);
+            if (ext_img_info) {
+                switch (static_cast<uint32_t>(ext_img_info->handleType)) {
+                case VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA:
+                    ext_img_properties->externalMemoryProperties = {
+                        .externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT |
+                                                  VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
+                        .exportFromImportedHandleTypes =
+                            VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
+                        .compatibleHandleTypes =
+                            VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
+                    };
+                    break;
+                case VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA:
+                    ext_img_properties->externalMemoryProperties = {
+                        .externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT |
+                                                  VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
+                        .exportFromImportedHandleTypes =
+                            VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA,
+                        .compatibleHandleTypes =
+                            VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA,
+                    };
+                    break;
+                }
+            }
         }
 #endif
 
@@ -6300,6 +6314,16 @@ public:
                 VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA;
             pExternalSemaphoreProperties->exportFromImportedHandleTypes |=
                 VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA;
+            pExternalSemaphoreProperties->externalSemaphoreFeatures |=
+                VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT |
+                VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT;
+        }
+        if (pExternalSemaphoreInfo->handleType ==
+            static_cast<uint32_t>(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_ZIRCON_EVENT_BIT_FUCHSIA)) {
+            pExternalSemaphoreProperties->compatibleHandleTypes |=
+                VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_ZIRCON_EVENT_BIT_FUCHSIA;
+            pExternalSemaphoreProperties->exportFromImportedHandleTypes |=
+                VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_ZIRCON_EVENT_BIT_FUCHSIA;
             pExternalSemaphoreProperties->externalSemaphoreFeatures |=
                 VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT |
                 VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT;
