@@ -38,6 +38,8 @@
 #include <goldfish_codec2/store/GoldfishComponentStore.h>
 #include <gralloc_cb_bp.h>
 
+#include <color_buffer_utils.h>
+
 #include "C2GoldfishAvcDec.h"
 
 #define DEBUG 0
@@ -510,8 +512,6 @@ bool C2GoldfishAvcDec::setDecodeArgs(C2ReadView *inBuffer,
     return true;
 }
 
-bool C2GoldfishAvcDec::getVuiParams() { return true; }
-
 status_t C2GoldfishAvcDec::setFlushMode() {
     if (mContext) {
         mContext->flush();
@@ -635,9 +635,7 @@ C2GoldfishAvcDec::ensureDecoderState(const std::shared_ptr<C2BlockPool> &pool) {
         mOutBlock.reset();
     }
     if (!mOutBlock) {
-        // uint32_t format = HAL_PIXEL_FORMAT_YCBCR_420_888;//19;
-        // //HAL_PIXEL_FORMAT_YV12;
-        uint32_t format = 19; // HAL_PIXEL_FORMAT_YV12;
+        uint32_t format = HAL_PIXEL_FORMAT_YCBCR_420_888;
         C2MemoryUsage usage = {C2MemoryUsage::CPU_READ,
                                C2MemoryUsage::CPU_WRITE};
         usage.expected = (uint64_t)(BufferUsage::GPU_DATA_BUFFER);
@@ -654,9 +652,8 @@ C2GoldfishAvcDec::ensureDecoderState(const std::shared_ptr<C2BlockPool> &pool) {
             auto c2Handle = mOutBlock->handle();
             native_handle_t *grallocHandle =
                 UnwrapNativeCodec2GrallocHandle(c2Handle);
-            cb_handle_t *cbhandle = (cb_handle_t *)grallocHandle;
-            DDD("found handle %d", cbhandle->hostHandle);
-            mHostColorBufferId = cbhandle->hostHandle;
+            mHostColorBufferId = getColorBufferHandle(grallocHandle);
+            DDD("found handle %d", mHostColorBufferId);
         } else {
             C2GraphicView wView = mOutBlock->map().get();
             if (wView.error()) {
@@ -678,7 +675,7 @@ void C2GoldfishAvcDec::checkMode(const std::shared_ptr<C2BlockPool> &pool) {
     mHeight = mIntf->height();
     {
         // now get the block
-        constexpr uint32_t format = 19;
+        constexpr uint32_t format = HAL_PIXEL_FORMAT_YCBCR_420_888;
         std::shared_ptr<C2GraphicBlock> block;
         C2MemoryUsage usage = {C2MemoryUsage::CPU_READ,
                                C2MemoryUsage::CPU_WRITE};
@@ -693,8 +690,7 @@ void C2GoldfishAvcDec::checkMode(const std::shared_ptr<C2BlockPool> &pool) {
         auto c2Handle = block->handle();
         native_handle_t *grallocHandle =
             UnwrapNativeCodec2GrallocHandle(c2Handle);
-        cb_handle_t *cbhandle = (cb_handle_t *)grallocHandle;
-        int hostColorBufferId = cbhandle->hostHandle;
+        int hostColorBufferId = getColorBufferHandle(grallocHandle);
         if (hostColorBufferId > 0) {
             DDD("decoding to host color buffer");
             mEnableAndroidNativeBuffers = true;
@@ -705,7 +701,41 @@ void C2GoldfishAvcDec::checkMode(const std::shared_ptr<C2BlockPool> &pool) {
     }
 }
 
+void C2GoldfishAvcDec::getVuiParams(h264_image_t &img) {
+
+    VuiColorAspects vuiColorAspects;
+    vuiColorAspects.primaries = img.color_primaries;
+    vuiColorAspects.transfer = img.color_trc;
+    vuiColorAspects.coeffs = img.colorspace;
+    vuiColorAspects.fullRange = img.color_range == 2 ? true : false;
+
+    // convert vui aspects to C2 values if changed
+    if (!(vuiColorAspects == mBitstreamColorAspects)) {
+        mBitstreamColorAspects = vuiColorAspects;
+        ColorAspects sfAspects;
+        C2StreamColorAspectsInfo::input codedAspects = {0u};
+        ColorUtils::convertIsoColorAspectsToCodecAspects(
+            vuiColorAspects.primaries, vuiColorAspects.transfer,
+            vuiColorAspects.coeffs, vuiColorAspects.fullRange, sfAspects);
+        if (!C2Mapper::map(sfAspects.mPrimaries, &codedAspects.primaries)) {
+            codedAspects.primaries = C2Color::PRIMARIES_UNSPECIFIED;
+        }
+        if (!C2Mapper::map(sfAspects.mRange, &codedAspects.range)) {
+            codedAspects.range = C2Color::RANGE_UNSPECIFIED;
+        }
+        if (!C2Mapper::map(sfAspects.mMatrixCoeffs, &codedAspects.matrix)) {
+            codedAspects.matrix = C2Color::MATRIX_UNSPECIFIED;
+        }
+        if (!C2Mapper::map(sfAspects.mTransfer, &codedAspects.transfer)) {
+            codedAspects.transfer = C2Color::TRANSFER_UNSPECIFIED;
+        }
+        std::vector<std::unique_ptr<C2SettingResult>> failures;
+        (void)mIntf->config({&codedAspects}, C2_MAY_BLOCK, &failures);
+    }
+}
+
 void C2GoldfishAvcDec::copyImageData(uint8_t *pBuffer, h264_image_t &img) {
+    getVuiParams(img);
     if (mEnableAndroidNativeBuffers)
         return;
     int myStride = mWidth;
@@ -845,7 +875,6 @@ void C2GoldfishAvcDec::process(const std::unique_ptr<C2Work> &work,
             //            (void) ivdec_api_function(mDecHandle, &s_decode_ip,
             //            &s_decode_op);
         }
-        (void)getVuiParams();
         if (mImg.data != nullptr) {
             DDD("got data %" PRIu64,  mPts2Index[mImg.pts]);
             hasPicture = true;
