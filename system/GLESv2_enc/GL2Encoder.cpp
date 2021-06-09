@@ -1109,10 +1109,14 @@ void GL2Encoder::s_glGetBooleanv(void *self, GLenum param, GLboolean *ptr)
 
     default:
         if (!state) return;
-        if (!state->getClientStateParameter<GLboolean>(param, ptr)) {
-            ctx->safe_glGetBooleanv(param, ptr);
+        {
+            GLint intVal;
+            if (!state->getClientStateParameter<GLint>(param, &intVal)) {
+                ctx->safe_glGetBooleanv(param, ptr);
+            } else {
+                *ptr = (intVal != 0) ? GL_TRUE : GL_FALSE;
+            }
         }
-        *ptr = (*ptr != 0) ? GL_TRUE : GL_FALSE;
         break;
     }
 }
@@ -1459,7 +1463,7 @@ void GL2Encoder::s_glDrawElements(void *self, GLenum mode, GLsizei count, GLenum
 
     if (!has_client_vertex_arrays && !has_indirect_arrays) {
         // ALOGW("glDrawElements: no vertex arrays / buffers bound to the command\n");
-        GLenum status = ctx->m_glCheckFramebufferStatus_enc(self, GL_FRAMEBUFFER);
+        GLenum status = ctx->glCheckFramebufferStatus(self, GL_FRAMEBUFFER);
         SET_ERROR_IF(status != GL_FRAMEBUFFER_COMPLETE, GL_INVALID_FRAMEBUFFER_OPERATION);
     }
 
@@ -1576,7 +1580,7 @@ void GL2Encoder::s_glDrawElementsNullAEMU(void *self, GLenum mode, GLsizei count
 
     if (!has_client_vertex_arrays && !has_indirect_arrays) {
         // ALOGW("glDrawElements: no vertex arrays / buffers bound to the command\n");
-        GLenum status = ctx->m_glCheckFramebufferStatus_enc(self, GL_FRAMEBUFFER);
+        GLenum status = ctx->glCheckFramebufferStatus(self, GL_FRAMEBUFFER);
         SET_ERROR_IF(status != GL_FRAMEBUFFER_COMPLETE, GL_INVALID_FRAMEBUFFER_OPERATION);
     }
 
@@ -4577,7 +4581,7 @@ void GL2Encoder::s_glDrawElementsInstanced(void* self, GLenum mode, GLsizei coun
 
     if (!has_client_vertex_arrays && !has_indirect_arrays) {
         // ALOGW("glDrawElements: no vertex arrays / buffers bound to the command\n");
-        GLenum status = ctx->m_glCheckFramebufferStatus_enc(self, GL_FRAMEBUFFER);
+        GLenum status = ctx->glCheckFramebufferStatus(self, GL_FRAMEBUFFER);
         SET_ERROR_IF(status != GL_FRAMEBUFFER_COMPLETE, GL_INVALID_FRAMEBUFFER_OPERATION);
     }
 
@@ -4670,7 +4674,7 @@ void GL2Encoder::s_glDrawRangeElements(void* self, GLenum mode, GLuint start, GL
 
     if (!has_client_vertex_arrays && !has_indirect_arrays) {
         // ALOGW("glDrawElements: no vertex arrays / buffers bound to the command\n");
-        GLenum status = ctx->m_glCheckFramebufferStatus_enc(self, GL_FRAMEBUFFER);
+        GLenum status = ctx->glCheckFramebufferStatus(self, GL_FRAMEBUFFER);
         SET_ERROR_IF(status != GL_FRAMEBUFFER_COMPLETE, GL_INVALID_FRAMEBUFFER_OPERATION);
     }
 
@@ -6111,7 +6115,7 @@ void GL2Encoder::s_glCopyTexSubImage2D(void *self , GLenum target, GLint level, 
     GLuint tex = ctx->m_state->getBoundTexture(target);
     GLsizei neededWidth = xoffset + width;
     GLsizei neededHeight = yoffset + height;
-    ALOGD("%s: tex %u needed width height %d %d xoff %d width %d yoff %d height %d (texture width %d height %d) level %d\n", __func__,
+    ALOGV("%s: tex %u needed width height %d %d xoff %d width %d yoff %d height %d (texture width %d height %d) level %d\n", __func__,
             tex,
             neededWidth,
             neededHeight,

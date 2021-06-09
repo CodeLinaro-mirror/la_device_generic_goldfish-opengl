@@ -178,6 +178,7 @@ using android::aligned_buf_alloc;
 using android::aligned_buf_free;
 using android::base::Optional;
 using android::base::guest::AutoLock;
+using android::base::guest::RecursiveLock;
 using android::base::guest::Lock;
 using android::base::guest::WorkPool;
 
@@ -338,7 +339,7 @@ public:
     };
 
     struct VkQueue_Info {
-        uint32_t placeholder;
+        VkDevice device;
     };
 
     // custom guest-side structs for images/buffers because of AHardwareBuffer :((
@@ -1587,6 +1588,23 @@ public:
         }
     }
 
+    void on_vkGetDeviceQueue(void*,
+                             VkDevice device,
+                             uint32_t,
+                             uint32_t,
+                             VkQueue* pQueue) {
+        AutoLock lock(mLock);
+        info_VkQueue[*pQueue].device = device;
+    }
+
+    void on_vkGetDeviceQueue2(void*,
+                              VkDevice device,
+                              const VkDeviceQueueInfo2*,
+                              VkQueue* pQueue) {
+        AutoLock lock(mLock);
+        info_VkQueue[*pQueue].device = device;
+    }
+
     VkResult on_vkCreateInstance(
         void* context,
         VkResult input_result,
@@ -1870,7 +1888,11 @@ public:
         if (info.eventHandle != ZX_HANDLE_INVALID) {
             zx_handle_close(info.eventHandle);
         }
+#if VK_HEADER_VERSION < 174
         info.eventHandle = pInfo->handle;
+#else // VK_HEADER_VERSION >= 174
+        info.eventHandle = pInfo->zirconHandle;
+#endif // VK_HEADER_VERSION < 174
         if (info.eventHandle != ZX_HANDLE_INVALID) {
             info.eventKoid = getEventKoid(info.eventHandle);
         }
@@ -6797,7 +6819,7 @@ public:
     }
 
 private:
-    mutable Lock mLock;
+    mutable RecursiveLock mLock;
     HostVisibleMemoryVirtualizationInfo mHostVisibleMemoryVirtInfo;
     std::unique_ptr<EmulatorFeatureInfo> mFeatureInfo;
     std::unique_ptr<GoldfishAddressSpaceBlockProvider> mGoldfishAddressSpaceBlockProvider;
@@ -7050,6 +7072,22 @@ void ResourceTracker::on_vkGetPhysicalDeviceMemoryProperties2KHR(
     VkPhysicalDeviceMemoryProperties2* pMemoryProperties) {
     mImpl->on_vkGetPhysicalDeviceMemoryProperties2(
         context, physicalDevice, pMemoryProperties);
+}
+
+void ResourceTracker::on_vkGetDeviceQueue(void* context,
+                                          VkDevice device,
+                                          uint32_t queueFamilyIndex,
+                                          uint32_t queueIndex,
+                                          VkQueue* pQueue) {
+    mImpl->on_vkGetDeviceQueue(context, device, queueFamilyIndex, queueIndex,
+                               pQueue);
+}
+
+void ResourceTracker::on_vkGetDeviceQueue2(void* context,
+                                           VkDevice device,
+                                           const VkDeviceQueueInfo2* pQueueInfo,
+                                           VkQueue* pQueue) {
+    mImpl->on_vkGetDeviceQueue2(context, device, pQueueInfo, pQueue);
 }
 
 VkResult ResourceTracker::on_vkCreateInstance(
