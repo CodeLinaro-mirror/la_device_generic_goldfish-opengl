@@ -393,8 +393,7 @@ private:  // **** impl ****
 
         // camera delivers bits to the buffer directly and does not require
         // an explicit read.
-        const bool cbReadable = cb.usage & BufferUsage::CPU_READ_MASK;
-        if (usageSwRead && !usageHwCamera && cbReadable) {
+        if (usageSwRead && !usageHwCamera) {
             if (gralloc_is_yuv_format(cb.format)) {
                 if (rcEnc->hasYUVCache()) {
                     uint32_t bufferSize;
