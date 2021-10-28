@@ -20,7 +20,9 @@
 
 #include <atomic>
 #include <numeric>
+#include <sstream>
 
+#include "Common.h"
 #include "Device.h"
 
 namespace android {
@@ -70,29 +72,34 @@ Display::Display(Device& device, Composer* composer, hwc2_display_t id)
 
 Display::~Display() {}
 
-HWC2::Error Display::init(uint32_t width, uint32_t height, uint32_t dpiX,
-                          uint32_t dpiY, uint32_t refreshRateHz,
+HWC2::Error Display::init(const std::vector<DisplayConfig>& configs,
+                          int activeConfig,
                           const std::optional<std::vector<uint8_t>>& edid) {
   ALOGD("%s initializing display:%" PRIu64
         " width:%d height:%d dpiX:%d dpiY:%d refreshRateHz:%d",
-        __FUNCTION__, mId, width, height, dpiX, dpiY, refreshRateHz);
+        __FUNCTION__, mId, configs[activeConfig].width,
+        configs[activeConfig].height,
+        configs[activeConfig].dpiX,
+        configs[activeConfig].dpiY,
+        configs[activeConfig].refreshRateHz);
 
   std::unique_lock<std::recursive_mutex> lock(mStateMutex);
 
-  mVsyncPeriod = 1000 * 1000 * 1000 / refreshRateHz;
+  mVsyncPeriod = 1000 * 1000 * 1000 / configs[activeConfig].refreshRateHz;
   mVsyncThread->run("", ANDROID_PRIORITY_URGENT_DISPLAY);
 
-  hwc2_config_t configId = sNextConfigId++;
+  for (hwc2_config_t id = 0; id < configs.size(); id++) {
+    Config config(id);
+    config.setAttribute(HWC2::Attribute::VsyncPeriod,
+                        1000 * 1000 * 1000 / configs[id].refreshRateHz);
+    config.setAttribute(HWC2::Attribute::Width, configs[id].width);
+    config.setAttribute(HWC2::Attribute::Height, configs[id].height);
+    config.setAttribute(HWC2::Attribute::DpiX, configs[id].dpiX * 1000);
+    config.setAttribute(HWC2::Attribute::DpiY, configs[id].dpiY * 1000);
+    mConfigs.emplace(id, config);
+  }
+  mActiveConfigId = activeConfig;
 
-  Config config(configId);
-  config.setAttribute(HWC2::Attribute::VsyncPeriod, mVsyncPeriod);
-  config.setAttribute(HWC2::Attribute::Width, width);
-  config.setAttribute(HWC2::Attribute::Height, height);
-  config.setAttribute(HWC2::Attribute::DpiX, dpiX * 1000);
-  config.setAttribute(HWC2::Attribute::DpiY, dpiY * 1000);
-  mConfigs.emplace(configId, config);
-
-  mActiveConfigId = configId;
   mActiveColorMode = HAL_COLOR_MODE_NATIVE;
   mColorModes.emplace((android_color_mode_t)HAL_COLOR_MODE_NATIVE);
   mEdid = edid;
@@ -507,7 +514,14 @@ HWC2::Error Display::setActiveConfig(hwc2_config_t configId) {
     return HWC2::Error::BadConfig;
   }
 
-  mActiveConfigId = configId;
+  if (mActiveConfigId != configId) {
+    if (mComposer == nullptr) {
+      ALOGE("%s: display:%" PRIu64 " missing composer", __FUNCTION__, mId);
+      return HWC2::Error::NoResources;
+    }
+    mActiveConfigId = configId;
+    return mComposer->onActiveConfigChange(this);
+  }
   return HWC2::Error::None;
 }
 
@@ -606,6 +620,17 @@ HWC2::Error Display::setPowerMode(int32_t intMode) {
 
   std::unique_lock<std::recursive_mutex> lock(mStateMutex);
 
+  if (IsCuttlefish()) {
+    if (int fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC); fd != -1) {
+      std::ostringstream stream;
+      stream << "VIRTUAL_DEVICE_DISPLAY_POWER_MODE_CHANGED display="
+             << mId << " mode=" << modeString;
+      std::string message = stream.str();
+      write(fd, message.c_str(), message.length());
+      close(fd);
+    }
+  }
+
   mPowerMode = mode;
   return HWC2::Error::None;
 }
@@ -625,14 +650,6 @@ HWC2::Error Display::setVsyncEnabled(int32_t intEnable) {
             mId, enableString.c_str());
 
   mVsyncEnabled = enable;
-  return HWC2::Error::None;
-}
-
-HWC2::Error Display::setVsyncPeriod(uint32_t period) {
-  DEBUG_LOG("%s: display:%" PRIu64 " setting vsync period to %d", __FUNCTION__,
-            mId, period);
-
-  mVsyncPeriod = period;
   return HWC2::Error::None;
 }
 
