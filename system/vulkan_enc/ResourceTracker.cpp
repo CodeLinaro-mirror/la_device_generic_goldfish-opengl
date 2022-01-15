@@ -993,9 +993,9 @@ public:
                 ALOGE("failed to open control device");
                 abort();
             }
-            mControlDevice = std::make_unique<
-                fidl::WireSyncClient<fuchsia_hardware_goldfish::ControlDevice>>(
-                std::move(channel));
+            mControlDevice =
+                fidl::WireSyncClient<fuchsia_hardware_goldfish::ControlDevice>(
+                    std::move(channel));
 
             fidl::ClientEnd<fuchsia_sysmem::Allocator> sysmem_channel{
                 zx::channel(GetConnectToServiceFunction()("/svc/fuchsia.sysmem.Allocator"))};
@@ -1003,7 +1003,7 @@ public:
                 ALOGE("failed to open sysmem connection");
             }
             mSysmemAllocator =
-                std::make_unique<fidl::WireSyncClient<fuchsia_sysmem::Allocator>>(
+                fidl::WireSyncClient<fuchsia_sysmem::Allocator>(
                     std::move(sysmem_channel));
             char name[ZX_MAX_NAME_LEN] = {};
             zx_object_get_property(zx_process_self(), ZX_PROP_NAME, name, sizeof(name));
@@ -2091,7 +2091,7 @@ public:
         auto sysmem_collection = reinterpret_cast<
             fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>*>(collection);
         if (sysmem_collection) {
-            sysmem_collection->Close();
+            (*sysmem_collection)->Close();
         }
         delete sysmem_collection;
 
@@ -2453,16 +2453,16 @@ public:
                 : fuchsia_sysmem::wire::kFormatModifierGoogleGoldfishOptimal;
 
         constraints->image_format_constraints
-            [constraints->image_format_constraints_count++] =
-            std::move(imageConstraints);
+            [constraints->image_format_constraints_count++] = imageConstraints;
         return VK_SUCCESS;
     }
 
     VkResult setBufferCollectionImageConstraints(
         VkEncoder* enc,
         VkDevice device,
-        fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>* collection,
+        fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>* pCollection,
         const VkImageConstraintsInfoFUCHSIAX* pImageConstraintsInfo) {
+        const auto& collection = *pCollection;
         if (!pImageConstraintsInfo ||
             (pImageConstraintsInfo->sType !=
                  VK_STRUCTURE_TYPE_IMAGE_CONSTRAINTS_INFO_FUCHSIAX &&
@@ -2601,7 +2601,7 @@ public:
         // |collection| is a valid VkBufferCollectionFUCHSIAX handle.
         AutoLock<RecursiveLock> lock(mLock);
         VkBufferCollectionFUCHSIAX buffer_collection =
-            reinterpret_cast<VkBufferCollectionFUCHSIAX>(collection);
+            reinterpret_cast<VkBufferCollectionFUCHSIAX>(pCollection);
         if (info_VkBufferCollectionFUCHSIAX.find(buffer_collection) !=
             info_VkBufferCollectionFUCHSIAX.end()) {
             info_VkBufferCollectionFUCHSIAX[buffer_collection].constraints =
@@ -2614,8 +2614,9 @@ public:
     }
 
     VkResult setBufferCollectionBufferConstraints(
-        fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>* collection,
+        fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>* pCollection,
         const VkBufferConstraintsInfoFUCHSIAX* pBufferConstraintsInfo) {
+        const auto& collection = *pCollection;
         if (pBufferConstraintsInfo == nullptr) {
             ALOGE(
                 "setBufferCollectionBufferConstraints: "
@@ -2646,11 +2647,11 @@ public:
         // |collection| is a valid VkBufferCollectionFUCHSIAX handle.
         AutoLock<RecursiveLock> lock(mLock);
         VkBufferCollectionFUCHSIAX buffer_collection =
-            reinterpret_cast<VkBufferCollectionFUCHSIAX>(collection);
+            reinterpret_cast<VkBufferCollectionFUCHSIAX>(pCollection);
         if (info_VkBufferCollectionFUCHSIAX.find(buffer_collection) !=
             info_VkBufferCollectionFUCHSIAX.end()) {
             info_VkBufferCollectionFUCHSIAX[buffer_collection].constraints =
-                android::base::makeOptional(std::move(constraints));
+                android::base::makeOptional(constraints);
         }
 
         return VK_SUCCESS;
@@ -2791,7 +2792,7 @@ public:
         VkBufferCollectionFUCHSIAX collection,
         VkBufferCollectionProperties2FUCHSIAX* pProperties) {
         VkEncoder* enc = (VkEncoder*)context;
-        auto sysmem_collection = reinterpret_cast<
+        const auto& sysmem_collection = *reinterpret_cast<
             fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>*>(collection);
 
         auto result = sysmem_collection->WaitForBuffersAllocated();
@@ -3448,7 +3449,7 @@ public:
         if (importBufferCollection) {
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
-            auto collection = reinterpret_cast<
+            const auto& collection = *reinterpret_cast<
                 fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>*>(
                 importBufferCollectionInfoPtr->collection);
             auto result = collection->WaitForBuffersAllocated();
@@ -3594,7 +3595,7 @@ public:
                 }
 
                 {
-                    auto result = collection.WaitForBuffersAllocated();
+                    auto result = collection->WaitForBuffersAllocated();
                     if (result.ok() && result.Unwrap()->status == ZX_OK) {
                         fuchsia_sysmem::wire::BufferCollectionInfo2& info =
                             result.Unwrap()->buffer_collection_info;
@@ -3613,7 +3614,7 @@ public:
                     }
                 }
 
-                collection.Close();
+                collection->Close();
 
                 zx::vmo vmo_copy;
                 zx_status_t status = zx_handle_duplicate(vmo_handle, ZX_RIGHT_SAME_RIGHTS,
@@ -3682,10 +3683,10 @@ public:
                         fidl::Arena arena;
                         fuchsia_hardware_goldfish::wire::CreateColorBuffer2Params createParams(
                             arena);
-                        createParams.set_width(arena, pImageCreateInfo->extent.width)
-                            .set_height(arena, pImageCreateInfo->extent.height)
-                            .set_format(arena, format)
-                            .set_memory_property(arena,
+                        createParams.set_width(pImageCreateInfo->extent.width)
+                            .set_height(pImageCreateInfo->extent.height)
+                            .set_format(format)
+                            .set_memory_property(
                                 fuchsia_hardware_goldfish::wire::kMemoryPropertyDeviceLocal);
 
                         auto result = mControlDevice->CreateColorBuffer2(
@@ -3711,7 +3712,7 @@ public:
                     fuchsia_hardware_goldfish::wire::CreateBuffer2Params createParams(arena);
                     createParams.set_size(arena,
                             pBufferConstraintsInfo->pBufferCreateInfo->size)
-                        .set_memory_property(arena,
+                        .set_memory_property(
                             fuchsia_hardware_goldfish::wire::kMemoryPropertyDeviceLocal);
 
                     auto result =
@@ -4275,7 +4276,7 @@ public:
         }
 
         if (extBufferCollectionPtr) {
-            auto collection = reinterpret_cast<
+            const auto& collection = *reinterpret_cast<
                 fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>*>(
                 extBufferCollectionPtr->collection);
             uint32_t index = extBufferCollectionPtr->index;
@@ -4334,12 +4335,12 @@ public:
                     fidl::Arena arena;
                     fuchsia_hardware_goldfish::wire::CreateColorBuffer2Params createParams(
                         arena);
-                    createParams.set_width(arena,
+                    createParams.set_width(
                             info.settings.image_format_constraints.min_coded_width)
-                        .set_height(arena,
+                        .set_height(
                             info.settings.image_format_constraints.min_coded_height)
-                        .set_format(arena, format)
-                        .set_memory_property(arena, memory_property);
+                        .set_format(format)
+                        .set_memory_property(memory_property);
 
                     auto result =
                         mControlDevice->CreateColorBuffer2(std::move(vmo), std::move(createParams));
@@ -5351,7 +5352,7 @@ public:
         }
 
         if (extBufferCollectionPtr) {
-            auto collection = reinterpret_cast<
+            const auto& collection = *reinterpret_cast<
                 fidl::WireSyncClient<fuchsia_sysmem::BufferCollection>*>(
                 extBufferCollectionPtr->collection);
             uint32_t index = extBufferCollectionPtr->index;
@@ -5372,11 +5373,11 @@ public:
                 fidl::Arena arena;
                 fuchsia_hardware_goldfish::wire::CreateBuffer2Params createParams(arena);
                 createParams.set_size(arena, pCreateInfo->size)
-                    .set_memory_property(arena,
+                    .set_memory_property(
                         fuchsia_hardware_goldfish::wire::kMemoryPropertyDeviceLocal);
 
                 auto result =
-                    mControlDevice->CreateBuffer2(std::move(*vmo), std::move(createParams));
+                    mControlDevice->CreateBuffer2(std::move(*vmo), createParams);
                 if (!result.ok() ||
                     (result.Unwrap()->result.is_err() != ZX_OK &&
                      result.Unwrap()->result.err() != ZX_ERR_ALREADY_EXISTS)) {
@@ -7278,10 +7279,9 @@ private:
 #endif
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
-    std::unique_ptr<
-        fidl::WireSyncClient<fuchsia_hardware_goldfish::ControlDevice>>
+    fidl::WireSyncClient<fuchsia_hardware_goldfish::ControlDevice>
         mControlDevice;
-    std::unique_ptr<fidl::WireSyncClient<fuchsia_sysmem::Allocator>>
+    fidl::WireSyncClient<fuchsia_sysmem::Allocator>
         mSysmemAllocator;
 #endif
 
@@ -7392,7 +7392,7 @@ void ResourceTracker::resetCommandPoolStagingInfo(VkCommandPool commandPool) {
 
 
 // static
-__attribute__((always_inline)) VkEncoder* ResourceTracker::getCommandBufferEncoder(VkCommandBuffer commandBuffer) {
+ALWAYS_INLINE VkEncoder* ResourceTracker::getCommandBufferEncoder(VkCommandBuffer commandBuffer) {
     if (!(ResourceTracker::streamFeatureBits & VULKAN_STREAM_FEATURE_QUEUE_SUBMIT_WITH_COMMANDS_BIT)) {
         auto enc = ResourceTracker::getThreadLocalEncoder();
         ResourceTracker::get()->syncEncodersForCommandBuffer(commandBuffer, enc);
@@ -7409,7 +7409,7 @@ __attribute__((always_inline)) VkEncoder* ResourceTracker::getCommandBufferEncod
 }
 
 // static
-__attribute__((always_inline)) VkEncoder* ResourceTracker::getQueueEncoder(VkQueue queue) {
+ALWAYS_INLINE VkEncoder* ResourceTracker::getQueueEncoder(VkQueue queue) {
     auto enc = ResourceTracker::getThreadLocalEncoder();
     if (!(ResourceTracker::streamFeatureBits & VULKAN_STREAM_FEATURE_QUEUE_SUBMIT_WITH_COMMANDS_BIT)) {
         ResourceTracker::get()->syncEncodersForQueue(queue, enc);
@@ -7418,7 +7418,7 @@ __attribute__((always_inline)) VkEncoder* ResourceTracker::getQueueEncoder(VkQue
 }
 
 // static
-__attribute__((always_inline)) VkEncoder* ResourceTracker::getThreadLocalEncoder() {
+ALWAYS_INLINE VkEncoder* ResourceTracker::getThreadLocalEncoder() {
     auto hostConn = ResourceTracker::threadingCallbacks.hostConnectionGetFunc();
     auto vkEncoder = ResourceTracker::threadingCallbacks.vkEncoderGetFunc(hostConn);
     return vkEncoder;
@@ -7430,13 +7430,13 @@ void ResourceTracker::setSeqnoPtr(uint32_t* seqnoptr) {
 }
 
 // static
-__attribute__((always_inline)) uint32_t ResourceTracker::nextSeqno() {
+ALWAYS_INLINE uint32_t ResourceTracker::nextSeqno() {
     uint32_t res = __atomic_add_fetch(sSeqnoPtr, 1, __ATOMIC_SEQ_CST);
     return res;
 }
 
 // static
-__attribute__((always_inline)) uint32_t ResourceTracker::getSeqno() {
+ALWAYS_INLINE uint32_t ResourceTracker::getSeqno() {
     uint32_t res = __atomic_load_n(sSeqnoPtr, __ATOMIC_SEQ_CST);
     return res;
 }
