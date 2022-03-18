@@ -363,8 +363,7 @@ HostConnection::HostConnection() :
     m_glExtensions(),
     m_grallocOnly(true),
     m_noHostError(true),
-    m_rendernodeFd(-1),
-    m_rendernodeFdOwned(false) {
+    m_rendernodeFd(-1) {
 #ifdef HOST_BUILD
     android::base::initializeTracing();
 #endif
@@ -382,10 +381,6 @@ HostConnection::~HostConnection()
         delete m_grallocHelper;
     }
 
-    if (m_rendernodeFdOwned) {
-        close(m_rendernodeFd);
-    }
-
     if (m_vkEnc) {
         m_vkEnc->decRef();
     }
@@ -396,7 +391,7 @@ HostConnection::~HostConnection()
 }
 
 // static
-std::unique_ptr<HostConnection> HostConnection::connect() {
+std::unique_ptr<HostConnection> HostConnection::connect(uint32_t capset_id) {
     const enum HostConnectionType connType = getConnectionTypeFromProperty();
 
     // Use "new" to access a non-public constructor.
@@ -472,8 +467,7 @@ std::unique_ptr<HostConnection> HostConnection::connect() {
             auto rendernodeFd = stream->getRendernodeFd();
             con->m_processPipe = stream->getProcessPipe();
             con->m_stream = stream;
-            con->m_rendernodeFdOwned = false;
-            con->m_rendernodeFdOwned = rendernodeFd;
+            con->m_rendernodeFd = rendernodeFd;
             MinigbmGralloc* m = new MinigbmGralloc;
             m->setFd(rendernodeFd);
             con->m_grallocHelper = m;
@@ -491,7 +485,6 @@ std::unique_ptr<HostConnection> HostConnection::connect() {
             }
             con->m_connectionType = HOST_CONNECTION_VIRTIO_GPU_PIPE;
             con->m_grallocType = getGrallocTypeFromProperty();
-            con->m_rendernodeFdOwned = false;
             auto rendernodeFd = stream->getRendernodeFd();
             con->m_stream = stream;
             con->m_rendernodeFd = rendernodeFd;
@@ -514,14 +507,13 @@ std::unique_ptr<HostConnection> HostConnection::connect() {
         }
 #if !defined(HOST_BUILD) && !defined(__Fuchsia__)
         case HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE: {
-            auto stream = createVirtioGpuAddressSpaceStream(STREAM_BUFFER_SIZE);
+            auto stream = createVirtioGpuAddressSpaceStream(STREAM_BUFFER_SIZE, capset_id);
             if (!stream) {
                 ALOGE("Failed to create virtgpu AddressSpaceStream for host connection\n");
                 return nullptr;
             }
             con->m_connectionType = HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE;
             con->m_grallocType = getGrallocTypeFromProperty();
-            con->m_rendernodeFdOwned = false;
             auto rendernodeFd = stream->getRendernodeFd();
             con->m_stream = stream;
             con->m_rendernodeFd = rendernodeFd;
@@ -563,17 +555,21 @@ std::unique_ptr<HostConnection> HostConnection::connect() {
 }
 
 HostConnection *HostConnection::get() {
-    return getWithThreadInfo(getEGLThreadInfo());
+    return getWithThreadInfo(getEGLThreadInfo(), VIRTIO_GPU_CAPSET_NONE);
 }
 
-HostConnection *HostConnection::getWithThreadInfo(EGLThreadInfo* tinfo) {
+HostConnection *HostConnection::getOrCreate(uint32_t capset_id) {
+    return getWithThreadInfo(getEGLThreadInfo(), capset_id);
+}
+
+HostConnection *HostConnection::getWithThreadInfo(EGLThreadInfo* tinfo, uint32_t capset_id) {
     // Get thread info
     if (!tinfo) {
         return NULL;
     }
 
     if (tinfo->hostConn == NULL) {
-        tinfo->hostConn = HostConnection::createUnique();
+        tinfo->hostConn = HostConnection::createUnique(capset_id);
     }
 
     return tinfo->hostConn.get();
@@ -599,9 +595,9 @@ void HostConnection::exitUnclean() {
 }
 
 // static
-std::unique_ptr<HostConnection> HostConnection::createUnique() {
+std::unique_ptr<HostConnection> HostConnection::createUnique(uint32_t capset_id) {
     ALOGD("%s: call\n", __func__);
-    return connect();
+    return connect(capset_id);
 }
 
 GLEncoder *HostConnection::glEncoder()
@@ -682,30 +678,6 @@ ExtendedRCEncoderContext *HostConnection::rcEncoder()
         }
     }
     return m_rcEnc.get();
-}
-
-int HostConnection::getOrCreateRendernodeFd() {
-    if (m_rendernodeFd >= 0) return m_rendernodeFd;
-#ifdef __Fuchsia__
-    return -1;
-#else
-#ifdef VIRTIO_GPU
-    m_rendernodeFd = VirtioGpuPipeStream::openRendernode();
-    if (m_rendernodeFd < 0) {
-        ALOGE("%s: failed to create secondary "
-              "rendernode for host connection. "
-              "error: %s (%d)\n", __FUNCTION__,
-              strerror(errno), errno);
-        return -1;
-    }
-
-    // Remember to close it on exit
-    m_rendernodeFdOwned = true;
-    return m_rendernodeFd;
-#else
-    return -1;
-#endif
-#endif
 }
 
 gl_client_context_t *HostConnection::s_getGLContext()
@@ -790,9 +762,6 @@ void HostConnection::setChecksumHelper(ExtendedRCEncoderContext *rcEnc) {
 
 void HostConnection::queryAndSetSyncImpl(ExtendedRCEncoderContext *rcEnc) {
     const std::string& glExtensions = queryGLExtensions(rcEnc);
-#if PLATFORM_SDK_VERSION <= 16 || (!defined(__i386__) && !defined(__x86_64__))
-    rcEnc->setSyncImpl(SYNC_IMPL_NONE);
-#else
     if (glExtensions.find(kRCNativeSyncV4) != std::string::npos) {
         rcEnc->setSyncImpl(SYNC_IMPL_NATIVE_SYNC_V4);
     } else if (glExtensions.find(kRCNativeSyncV3) != std::string::npos) {
@@ -802,20 +771,15 @@ void HostConnection::queryAndSetSyncImpl(ExtendedRCEncoderContext *rcEnc) {
     } else {
         rcEnc->setSyncImpl(SYNC_IMPL_NONE);
     }
-#endif
 }
 
 void HostConnection::queryAndSetDmaImpl(ExtendedRCEncoderContext *rcEnc) {
     std::string glExtensions = queryGLExtensions(rcEnc);
-#if PLATFORM_SDK_VERSION <= 16 || (!defined(__i386__) && !defined(__x86_64__))
-    rcEnc->setDmaImpl(DMA_IMPL_NONE);
-#else
     if (glExtensions.find(kDmaExtStr_v1) != std::string::npos) {
         rcEnc->setDmaImpl(DMA_IMPL_v1);
     } else {
         rcEnc->setDmaImpl(DMA_IMPL_NONE);
     }
-#endif
 }
 
 void HostConnection::queryAndSetGLESMaxVersion(ExtendedRCEncoderContext* rcEnc) {
