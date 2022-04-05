@@ -640,6 +640,10 @@ HWC3::Error GuestFrameComposer::validateDisplay(Display* display,
       break;
     }
 
+    if (layerCompositionType == Composition::DISPLAY_DECORATION) {
+      return HWC3::Error::Unsupported;
+    }
+
     if (!canComposeLayer(layer)) {
       ALOGW("%s: display:%" PRIu64 " layer:%" PRIu64
             " composition not supported, falling back to client composition",
