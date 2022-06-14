@@ -2127,10 +2127,10 @@ bool GLClientState::usedRenderbufferName(GLuint name) const {
 void GLClientState::bindRenderbuffer(GLenum target, GLuint name) {
 
     (void)target; // Must be GL_RENDERBUFFER
-    RenderbufferInfo::ScopedView view(mRboState.rboData);
     if (name == mRboState.boundRenderbuffer) {
         return;
     }
+    RenderbufferInfo::ScopedView view(mRboState.rboData);
     view.unref(mRboState.boundRenderbuffer);
 
     mRboState.boundRenderbuffer = name;
