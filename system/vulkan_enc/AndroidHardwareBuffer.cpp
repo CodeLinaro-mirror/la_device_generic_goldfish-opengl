@@ -62,7 +62,7 @@ getAndroidHardwareBufferUsageFromVkUsage(const VkImageCreateFlags vk_create,
 
 VkResult getAndroidHardwareBufferPropertiesANDROID(
     Gralloc* grallocHelper,
-    const HostVisibleMemoryVirtualizationInfo* hostMemVirtInfo,
+    const VkPhysicalDeviceMemoryProperties* memProps,
     VkDevice,
     const AHardwareBuffer* buffer,
     VkAndroidHardwareBufferPropertiesANDROID* pProperties) {
@@ -159,7 +159,7 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
 #if !defined(HOST_BUILD)
 #if defined(__ANDROID__) || defined(__linux__)
         if (android_format_is_yuv(desc.format)) {
-            std::optional<uint32_t> drmFormat = grallocHelper->getFormatDrmFourcc(handle);
+            uint32_t drmFormat = grallocHelper->getFormatDrmFourcc(handle);
             if (drmFormat) {
                 // The host renderer is not aware of the plane ordering for YUV formats used
                 // in the guest and simply knows that the format "layout" is one of:
@@ -184,7 +184,7 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
                 //  * Y ends up in the G-channel
                 //  * U (CB) ends up in the B-channel
                 //  * V (CB) ends up in the R-channel
-                switch (*drmFormat) {
+                switch (drmFormat) {
                     case DRM_FORMAT_NV12:
                         // NV12 is a Y-plane followed by a interleaved UV-plane and is
                         // VK_FORMAT_G8_B8R8_2PLANE_420_UNORM on the host.
@@ -207,7 +207,7 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
                         break;
 
                     default:
-                        ALOGE("%s: Unhandled YUV drm format:%" PRIu32, __FUNCTION__, *drmFormat);
+                        ALOGE("%s: Unhandled YUV drm format:%" PRIu32, __FUNCTION__, drmFormat);
                         break;
                 }
             }
@@ -231,12 +231,12 @@ VkResult getAndroidHardwareBufferPropertiesANDROID(
         return VK_ERROR_INVALID_EXTERNAL_HANDLE;
     }
 
-    // Disallow host visible and noflags heaps for now
-    // (hard to make actual dedicated allocs)
+    // Disallow host visible (hard to make actual dedicated allocs)
     uint32_t memoryTypeBits = 0;
-    for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; ++i) {
-        if (isNoFlagsMemoryTypeIndexForGuest(hostMemVirtInfo, i)) continue;
-        if (isHostVisibleMemoryTypeIndexForGuest(hostMemVirtInfo, i)) continue;
+    for (uint32_t i = 0; i < memProps->memoryTypeCount; ++i) {
+        if (isHostVisible(memProps, i))
+            continue;
+
         memoryTypeBits |= (1 << i);
     }
 
