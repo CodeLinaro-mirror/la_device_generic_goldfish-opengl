@@ -19,9 +19,9 @@
 #include "CommandBufferStagingStream.h"
 #include "DescriptorSetVirtualization.h"
 
-#include "android/base/Optional.h"
-#include "android/base/threads/AndroidWorkPool.h"
-#include "android/base/Tracing.h"
+#include "aemu/base/Optional.h"
+#include "aemu/base/threads/AndroidWorkPool.h"
+#include "aemu/base/Tracing.h"
 
 #include "goldfish_vk_private_defs.h"
 
@@ -37,6 +37,7 @@
 #include <fidl/fuchsia.sysmem/cpp/wire.h>
 #include <lib/zx/channel.h>
 #include <lib/zx/vmo.h>
+#include <optional>
 #include <zircon/errors.h>
 #include <zircon/process.h>
 #include <zircon/rights.h>
@@ -77,56 +78,21 @@ void zx_event_create(int, zx_handle_t*) { }
 
 #include <android/hardware_buffer.h>
 
-native_handle_t *AHardwareBuffer_getNativeHandle(AHardwareBuffer*) { return NULL; }
-
-uint64_t getAndroidHardwareBufferUsageFromVkUsage(
-    const VkImageCreateFlags vk_create,
-    const VkImageUsageFlags vk_usage) {
-  return AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
-}
-
-VkResult importAndroidHardwareBuffer(
-    Gralloc *grallocHelper,
-    const VkImportAndroidHardwareBufferInfoANDROID* info,
-    struct AHardwareBuffer **importOut) {
-  return VK_SUCCESS;
-}
-
-VkResult createAndroidHardwareBuffer(
-    bool hasDedicatedImage,
-    bool hasDedicatedBuffer,
-    const VkExtent3D& imageExtent,
-    uint32_t imageLayers,
-    VkFormat imageFormat,
-    VkImageUsageFlags imageUsage,
-    VkImageCreateFlags imageCreateFlags,
-    VkDeviceSize bufferSize,
-    VkDeviceSize allocationInfoAllocSize,
-    struct AHardwareBuffer **out) {
-  return VK_SUCCESS;
-}
-
-VkResult getAndroidHardwareBufferPropertiesANDROID(
-    Gralloc *grallocHelper,
-    const VkPhysicalDeviceMemoryProperties* memProps,
-    VkDevice,
-    const AHardwareBuffer*,
-    VkAndroidHardwareBufferPropertiesANDROID*) { return VK_SUCCESS; }
-
-VkResult getMemoryAndroidHardwareBufferANDROID(struct AHardwareBuffer **) { return VK_SUCCESS; }
-
 #endif // VK_USE_PLATFORM_ANDROID_KHR
 
 #include "HostVisibleMemoryVirtualization.h"
 #include "Resources.h"
 #include "VkEncoder.h"
 
-#include "android/base/AlignedBuf.h"
-#include "android/base/synchronization/AndroidLock.h"
+#include "aemu/base/AlignedBuf.h"
+#include "aemu/base/synchronization/AndroidLock.h"
+#include "virtgpu_gfxstream_protocol.h"
 
 #include "goldfish_address_space.h"
 #include "goldfish_vk_private_defs.h"
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
 #include "vk_format_info.h"
+#endif
 #include "vk_struct_id.h"
 #include "vk_util.h"
 
@@ -148,9 +114,6 @@ VkResult getMemoryAndroidHardwareBufferANDROID(struct AHardwareBuffer **) { retu
 
 #ifdef HOST_BUILD
 #include "android/utils/tempfile.h"
-#else
-#include "virtgpu_drm.h"
-#include <xf86drm.h>
 #endif
 
 static inline int
@@ -315,7 +278,9 @@ public:
         bool dedicated = false;
         bool imported = false;
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
         AHardwareBuffer* ahw = nullptr;
+#endif
         zx_handle_t vmoHandle = ZX_HANDLE_INVALID;
         VkDevice device;
 
@@ -378,7 +343,7 @@ public:
         VkDevice device;
         zx_handle_t eventHandle = ZX_HANDLE_INVALID;
         zx_koid_t eventKoid = ZX_KOID_INVALID;
-        int syncFd = -1;
+        std::optional<int> syncFd = {};
     };
 
     struct VkDescriptorUpdateTemplate_Info {
@@ -529,9 +494,11 @@ public:
 
         auto& memInfo = it->second;
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
         if (memInfo.ahw) {
             AHardwareBuffer_release(memInfo.ahw);
         }
+#endif
 
         if (memInfo.vmoHandle != ZX_HANDLE_INVALID) {
             zx_handle_close(memInfo.vmoHandle);
@@ -573,8 +540,8 @@ public:
         }
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
-        if (semInfo.syncFd >= 0) {
-            close(semInfo.syncFd);
+        if (semInfo.syncFd.value_or(-1) >= 0) {
+            close(semInfo.syncFd.value());
         }
 #endif
 
@@ -873,7 +840,9 @@ public:
         info.allocationSize = allocationSize;
         info.ptr = ptr;
         info.memoryTypeIndex = memoryTypeIndex;
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
         info.ahw = ahw;
+#endif
         info.imported = imported;
         info.vmoHandle = vmoHandle;
     }
@@ -979,12 +948,6 @@ public:
         if (mFeatureInfo->hasVulkanQueueSubmitWithCommands) {
             ResourceTracker::streamFeatureBits |= VULKAN_STREAM_FEATURE_QUEUE_SUBMIT_WITH_COMMANDS_BIT;
         }
-#if !defined(HOST_BUILD) && defined(VIRTIO_GPU)
-        if (mFeatureInfo->hasVirtioGpuNext) {
-            mRendernodeFd =
-                ResourceTracker::threadingCallbacks.hostConnectionGetFunc()->getRendernodeFd();
-        }
-#endif
     }
 
     void setThreadingCallbacks(const ResourceTracker::ThreadingCallbacks& callbacks) {
@@ -1673,6 +1636,7 @@ public:
         }
     }
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
     VkResult on_vkGetAndroidHardwareBufferPropertiesANDROID(
         void*, VkResult,
         VkDevice device,
@@ -1720,6 +1684,7 @@ public:
 
         return queryRes;
     }
+#endif
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
     VkResult on_vkGetMemoryZirconHandleFUCHSIA(
@@ -2902,12 +2867,76 @@ public:
     }
 #endif
 
-    VkResult allocateCoherentMemory(VkDevice device, const VkMemoryAllocateInfo *pAllocateInfo,
-                                    VkEncoder *enc, VkDeviceMemory* pMemory) {
+    CoherentMemoryPtr createCoherentMemory(VkDevice device,
+                                           VkDeviceMemory mem,
+                                           const VkMemoryAllocateInfo& hostAllocationInfo,
+                                           VkEncoder* enc,
+                                           VkResult& res)
+    {
+        CoherentMemoryPtr coherentMemory = nullptr;
+        if (mFeatureInfo->hasDirectMem) {
+            uint64_t gpuAddr = 0;
+            GoldfishAddressSpaceBlockPtr block = nullptr;
+            res = enc->vkMapMemoryIntoAddressSpaceGOOGLE(device, mem, &gpuAddr, true);
+            if (res != VK_SUCCESS) {
+                return coherentMemory;
+            }
+            {
+                AutoLock<RecursiveLock> lock(mLock);
+                auto it = info_VkDeviceMemory.find(mem);
+                if (it == info_VkDeviceMemory.end()) {
+                     res = VK_ERROR_OUT_OF_HOST_MEMORY;
+                     return coherentMemory;
+                }
+                auto& info = it->second;
+                block = info.goldfishBlock;
+                info.goldfishBlock = nullptr;
 
+                coherentMemory =
+                    std::make_shared<CoherentMemory>(block, gpuAddr, hostAllocationInfo.allocationSize, device, mem);
+            }
+        } else if (mFeatureInfo->hasVirtioGpuNext) {
+            struct VirtGpuCreateBlob createBlob = { 0 };
+            uint64_t hvaSizeId[3];
+            res = enc->vkGetMemoryHostAddressInfoGOOGLE(device, mem,
+                    &hvaSizeId[0], &hvaSizeId[1], &hvaSizeId[2], true /* do lock */);
+            if(res != VK_SUCCESS) {
+                return coherentMemory;
+            }
+            {
+                AutoLock<RecursiveLock> lock(mLock);
+                VirtGpuDevice& instance = VirtGpuDevice::getInstance((enum VirtGpuCapset)3);
+                createBlob.blobMem = kBlobMemHost3d;
+                createBlob.flags = kBlobFlagMappable;
+                createBlob.blobId = hvaSizeId[2];
+                createBlob.size = hostAllocationInfo.allocationSize;
+
+                auto blob = instance.createBlob(createBlob);
+                if (!blob) {
+                    res = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+                    return coherentMemory;
+                }
+
+                VirtGpuBlobMappingPtr mapping = blob->createMapping();
+                if (!mapping) {
+                    res = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+                    return coherentMemory;
+                }
+
+                coherentMemory =
+                    std::make_shared<CoherentMemory>(mapping, createBlob.size, device, mem);
+            }
+        } else {
+            ALOGE("FATAL: Unsupported virtual memory feature");
+            abort();
+        }
+        return coherentMemory;
+    }
+
+  VkResult allocateCoherentMemory(VkDevice device, const VkMemoryAllocateInfo *pAllocateInfo,
+                                    VkEncoder *enc, VkDeviceMemory* pMemory) {
         uint64_t offset = 0;
         uint8_t *ptr = nullptr;
-        struct VkDeviceMemory_Info info;
         VkMemoryAllocateFlagsInfo allocFlagsInfo;
         VkMemoryOpaqueCaptureAddressAllocateInfo opaqueCaptureAddressAllocInfo;
 
@@ -2952,84 +2981,40 @@ public:
         }
 
         VkDeviceMemory mem = VK_NULL_HANDLE;
-        mLock.unlock();
         VkResult host_res =
         enc->vkAllocateMemory(device, &hostAllocationInfo, nullptr,
                               &mem, true /* do lock */);
-        mLock.lock();
-
+        if(host_res != VK_SUCCESS) {
+            return host_res;
+        }
+        struct VkDeviceMemory_Info info;
         info.coherentMemorySize = hostAllocationInfo.allocationSize;
         info.memoryTypeIndex = hostAllocationInfo.memoryTypeIndex;
         info.device = device;
         info.dedicated = dedicated;
-
-        info_VkDeviceMemory[mem] = info;
-
-        CoherentMemoryPtr coherentMemory = nullptr;
-        if (mFeatureInfo->hasDirectMem) {
-            VkResult vkResult;
-            uint64_t gpuAddr = 0;
-            GoldfishAddressSpaceBlockPtr block = nullptr;
-
-            mLock.unlock();
-            vkResult = enc->vkMapMemoryIntoAddressSpaceGOOGLE(device, mem, &gpuAddr, true);
-            mLock.lock();
-
-            if (vkResult != VK_SUCCESS)
-                return vkResult;
-
-            auto it = info_VkDeviceMemory.find(mem);
-            if (it == info_VkDeviceMemory.end()) {
-                return VK_ERROR_OUT_OF_HOST_MEMORY;
-            }
-
-            auto& info = it->second;
-            block = info.goldfishBlock;
-            info.goldfishBlock = nullptr;
-
-            coherentMemory =
-                std::make_shared<CoherentMemory>(block, gpuAddr, hostAllocationInfo.allocationSize,
-                                                 enc, device, mem);
-        } else if (mFeatureInfo->hasVirtioGpuNext) {
-            struct VirtGpuCreateBlob createBlob = { 0 };
-            uint64_t hvaSizeId[3];
-
-            mLock.unlock();
-            enc->vkGetMemoryHostAddressInfoGOOGLE(device, mem,
-                    &hvaSizeId[0], &hvaSizeId[1], &hvaSizeId[2], true /* do lock */);
-            mLock.lock();
-
-            VirtGpuDevice& instance = VirtGpuDevice::getInstance((enum VirtGpuCapset)3);
-            createBlob.blobMem = kBlobMemHost3d;
-            createBlob.flags = kBlobFlagMappable;
-            createBlob.blobId = hvaSizeId[2];
-            createBlob.size = hostAllocationInfo.allocationSize;
-
-            auto blob = instance.createBlob(createBlob);
-            if (!blob) {
-                return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-            }
-
-            VirtGpuBlobMappingPtr mapping = blob->createMapping();
-            if (!mapping) {
-                return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-            }
-
-            coherentMemory =
-                std::make_shared<CoherentMemory>(mapping, createBlob.size, enc, device, mem);
+        {
+            // createCoherentMemory inside need to access info_VkDeviceMemory
+            // information. set it before use.
+            AutoLock<RecursiveLock> lock(mLock);
+            info_VkDeviceMemory[mem] = info;
         }
-
-        coherentMemory->subAllocate(pAllocateInfo->allocationSize, &ptr, offset);
-
-        info.allocationSize = pAllocateInfo->allocationSize;
-        info.coherentMemoryOffset = offset;
-        info.coherentMemory = coherentMemory;
-        info.ptr = ptr;
-
-        info_VkDeviceMemory[mem] = info;
-        *pMemory = mem;
-
-        return VK_SUCCESS;
+        auto coherentMemory = createCoherentMemory(device, mem, hostAllocationInfo, enc, host_res);
+        if(coherentMemory) {
+            AutoLock<RecursiveLock> lock(mLock);
+            coherentMemory->subAllocate(pAllocateInfo->allocationSize, &ptr, offset);
+            info.allocationSize = pAllocateInfo->allocationSize;
+            info.coherentMemoryOffset = offset;
+            info.coherentMemory = coherentMemory;
+            info.ptr = ptr;
+            info_VkDeviceMemory[mem] = info;
+            *pMemory = mem;
+        }
+        else {
+            enc->vkFreeMemory(device, mem, nullptr, true);
+            AutoLock<RecursiveLock> lock(mLock);
+            info_VkDeviceMemory.erase(mem);
+        }
+        return host_res;
     }
 
     VkResult getCoherentMemory(const VkMemoryAllocateInfo* pAllocateInfo, VkEncoder* enc,
@@ -3049,43 +3034,40 @@ public:
         CoherentMemoryPtr coherentMemory = nullptr;
         uint8_t *ptr = nullptr;
         uint64_t offset = 0;
-        for (const auto &[memory, info] : info_VkDeviceMemory) {
-            if (info.memoryTypeIndex != pAllocateInfo->memoryTypeIndex)
-                continue;
+        {
+            AutoLock<RecursiveLock> lock(mLock);
+            for (const auto &[memory, info] : info_VkDeviceMemory) {
+                if (info.memoryTypeIndex != pAllocateInfo->memoryTypeIndex)
+                    continue;
 
-            if (info.dedicated || dedicated)
-                continue;
+                if (info.dedicated || dedicated)
+                    continue;
 
-            if (!info.coherentMemory)
-                continue;
+                if (!info.coherentMemory)
+                    continue;
 
-            if (!info.coherentMemory->subAllocate(pAllocateInfo->allocationSize, &ptr, offset))
-                continue;
+                if (!info.coherentMemory->subAllocate(pAllocateInfo->allocationSize, &ptr, offset))
+                    continue;
 
-            coherentMemory = info.coherentMemory;
-            break;
-        }
+                coherentMemory = info.coherentMemory;
+                break;
+            }
+            if (coherentMemory) {
+                struct VkDeviceMemory_Info info;
+                info.coherentMemoryOffset = offset;
+                info.ptr = ptr;
+                info.memoryTypeIndex = pAllocateInfo->memoryTypeIndex;
+                info.allocationSize = pAllocateInfo->allocationSize;
+                info.coherentMemory = coherentMemory;
+                info.device = device;
 
-        struct VkDeviceMemory_Info info;
-        if (coherentMemory) {
-            info.coherentMemoryOffset = offset;
-            info.ptr = ptr;
-            info.memoryTypeIndex = pAllocateInfo->memoryTypeIndex;
-            info.allocationSize = pAllocateInfo->allocationSize;
-            info.coherentMemory = coherentMemory;
-            info.device = device;
-
-            auto mem = new_from_host_VkDeviceMemory(VK_NULL_HANDLE);
-            info_VkDeviceMemory[mem] = info;
-            *pMemory = mem;
-        } else {
-            VkResult result = allocateCoherentMemory(device, pAllocateInfo, enc, pMemory);
-            if (result != VK_SUCCESS) {
-                return result;
+                auto mem = new_from_host_VkDeviceMemory(VK_NULL_HANDLE);
+                info_VkDeviceMemory[mem] = info;
+                *pMemory = mem;
+                return VK_SUCCESS;
             }
         }
-
-        return VK_SUCCESS;
+        return allocateCoherentMemory(device, pAllocateInfo, enc, pMemory);
     }
 
     uint64_t getAHardwareBufferId(AHardwareBuffer* ahw) {
@@ -3182,8 +3164,12 @@ public:
         const VkExportMemoryAllocateInfo* exportAllocateInfoPtr =
             vk_find_struct<VkExportMemoryAllocateInfo>(pAllocateInfo);
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
         const VkImportAndroidHardwareBufferInfoANDROID* importAhbInfoPtr =
             vk_find_struct<VkImportAndroidHardwareBufferInfoANDROID>(pAllocateInfo);
+#else
+        const void* importAhbInfoPtr = nullptr;
+#endif
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
         const VkImportMemoryBufferCollectionFUCHSIA*
@@ -3739,8 +3725,6 @@ public:
 #endif
 
         // Host visible memory with direct mapping
-        AutoLock<RecursiveLock> lock(mLock);
-
         VkResult result = getCoherentMemory(&finalAllocInfo, enc, device, pMemory);
         if (result != VK_SUCCESS)
             return result;
@@ -3760,9 +3744,11 @@ public:
         if (it == info_VkDeviceMemory.end()) return;
         auto& info = it->second;
         uint64_t memoryObjectId = (uint64_t)(void*)memory;
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
         if (info.ahw) {
             memoryObjectId = getAHardwareBufferId(info.ahw);
         }
+#endif
         emitDeviceMemoryReport(
             info_VkDevice[device],
             info.imported ? VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_UNIMPORT_EXT
@@ -3801,7 +3787,12 @@ public:
                 info.ptr = nullptr;
             }
 
-            info.coherentMemory = nullptr;
+            auto coherentMemory = std::move(info.coherentMemory);
+            // We have to release the lock before we could possibly free a
+            // CoherentMemory, because that will call into VkEncoder, which
+            // shouldn't be called when the lock is held.
+            lock.unlock();
+            coherentMemory = nullptr;
         }
     }
 
@@ -4530,6 +4521,29 @@ public:
 #endif
     }
 
+    VkResult createFence(VkDevice device, uint64_t hostFenceHandle, int64_t& osHandle) {
+        struct VirtGpuExecBuffer exec = { };
+        struct gfxstreamCreateExportSyncVK exportSync = { };
+        VirtGpuDevice& instance = VirtGpuDevice::getInstance();
+
+        uint64_t hostDeviceHandle = get_host_u64_VkDevice(device);
+
+        exportSync.hdr.opCode = GFXSTREAM_CREATE_EXPORT_SYNC_VK;
+        exportSync.deviceHandleLo = (uint32_t)hostDeviceHandle;
+        exportSync.deviceHandleHi = (uint32_t)(hostDeviceHandle >> 32);
+        exportSync.fenceHandleLo = (uint32_t)hostFenceHandle;
+        exportSync.fenceHandleHi = (uint32_t)(hostFenceHandle >> 32);
+
+        exec.command = static_cast<void*>(&exportSync);
+        exec.command_size = sizeof(exportSync);
+        exec.flags = kFenceOut | kRingIdx;
+        if (instance.execBuffer(exec, nullptr))
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+        osHandle = exec.handle.osHandle;
+        return VK_SUCCESS;
+    }
+
     VkResult on_vkGetFenceFdKHR(
         void* context,
         VkResult,
@@ -4594,46 +4608,15 @@ public:
             }
 
             if (mFeatureInfo->hasVirtioGpuNativeSync) {
-#if !defined(HOST_BUILD) && defined(VK_USE_PLATFORM_ANDROID_KHR)
+                VkResult result;
+                int64_t osHandle;
                 uint64_t hostFenceHandle = get_host_u64_VkFence(pGetFdInfo->fence);
-                uint32_t hostFenceHandleLo = (uint32_t)hostFenceHandle;
-                uint32_t hostFenceHandleHi = (uint32_t)(hostFenceHandle >> 32);
 
-                uint64_t hostDeviceHandle = get_host_u64_VkDevice(device);
-                uint32_t hostDeviceHandleLo = (uint32_t)hostDeviceHandle;
-                uint32_t hostDeviceHandleHi = (uint32_t)(hostFenceHandle >> 32);
+                result = createFence(device, hostFenceHandle, osHandle);
+                if (result != VK_SUCCESS)
+                    return result;
 
-                #define VIRTIO_GPU_NATIVE_SYNC_VULKAN_CREATE_EXPORT_FD 0xa000
-
-                uint32_t cmdDwords[5] = {
-                    VIRTIO_GPU_NATIVE_SYNC_VULKAN_CREATE_EXPORT_FD,
-                    hostDeviceHandleLo,
-                    hostDeviceHandleHi,
-                    hostFenceHandleLo,
-                    hostFenceHandleHi,
-                };
-
-                struct drm_virtgpu_execbuffer execbuffer = {
-                    .flags = (uint32_t)(mFeatureInfo->hasVulkanAsyncQsri ?
-                                        (VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX) :
-                                        VIRTGPU_EXECBUF_FENCE_FD_OUT),
-                    .size = 5 * sizeof(uint32_t),
-                    .command = (uint64_t)(cmdDwords),
-                    .bo_handles = 0,
-                    .num_bo_handles = 0,
-                    .fence_fd = -1,
-                    .ring_idx = 0,
-                };
-
-                int res = drmIoctl(mRendernodeFd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &execbuffer);
-                if (res) {
-                    ALOGE("%s: Failed to virtgpu execbuffer: sterror: %s errno: %d\n", __func__,
-                            strerror(errno), errno);
-                    abort();
-                }
-
-                *pFd = execbuffer.fence_fd;
-#endif
+                *pFd = osHandle;
             } else {
                 goldfish_sync_queue_work(
                     mSyncDeviceFd,
@@ -5017,15 +5000,17 @@ public:
         VkDevice device, VkImage image, const VkAllocationCallbacks *pAllocator) {
 
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
-        AutoLock<RecursiveLock> lock(mLock);
+        {
+          AutoLock<RecursiveLock> lock(mLock); // do not guard encoder may cause
+                                               // deadlock b/243339973
 
-        // Wait for any pending QSRIs to prevent a race between the Gfxstream host
-        // potentially processing the below `vkDestroyImage()` from the VK encoder
-        // command stream before processing a previously submitted
-        // `VIRTIO_GPU_NATIVE_SYNC_VULKAN_QSRI_EXPORT` from the virtio-gpu command
-        // stream which relies on the image existing.
-        auto imageInfoIt = info_VkImage.find(image);
-        if (imageInfoIt != info_VkImage.end()) {
+          // Wait for any pending QSRIs to prevent a race between the Gfxstream host
+          // potentially processing the below `vkDestroyImage()` from the VK encoder
+          // command stream before processing a previously submitted
+          // `VIRTIO_GPU_NATIVE_SYNC_VULKAN_QSRI_EXPORT` from the virtio-gpu command
+          // stream which relies on the image existing.
+          auto imageInfoIt = info_VkImage.find(image);
+          if (imageInfoIt != info_VkImage.end()) {
             auto& imageInfo = imageInfoIt->second;
             for (int syncFd : imageInfo.pendingQsriSyncFds) {
                 int syncWaitRet = sync_wait(syncFd, 3000);
@@ -5036,9 +5021,9 @@ public:
                 close(syncFd);
             }
             imageInfo.pendingQsriSyncFds.clear();
+          }
         }
 #endif
-
         VkEncoder* enc = (VkEncoder*)context;
         enc->vkDestroyImage(device, image, pAllocator, true /* do lock */);
     }
@@ -5431,46 +5416,15 @@ public:
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
         if (exportSyncFd) {
             if (mFeatureInfo->hasVirtioGpuNativeSync) {
-#if !defined(HOST_BUILD)
+                VkResult result;
+                int64_t osHandle;
                 uint64_t hostFenceHandle = get_host_u64_VkSemaphore(*pSemaphore);
-                uint32_t hostFenceHandleLo = (uint32_t)hostFenceHandle;
-                uint32_t hostFenceHandleHi = (uint32_t)(hostFenceHandle >> 32);
 
-                uint64_t hostDeviceHandle = get_host_u64_VkDevice(device);
-                uint32_t hostDeviceHandleLo = (uint32_t)hostDeviceHandle;
-                uint32_t hostDeviceHandleHi = (uint32_t)(hostFenceHandle >> 32);
+                result = createFence(device, hostFenceHandle, osHandle);
+                if (result != VK_SUCCESS)
+                    return result;
 
-                #define VIRTIO_GPU_NATIVE_SYNC_VULKAN_CREATE_EXPORT_FD 0xa000
-
-                uint32_t cmdDwords[5] = {
-                    VIRTIO_GPU_NATIVE_SYNC_VULKAN_CREATE_EXPORT_FD,
-                    hostDeviceHandleLo,
-                    hostDeviceHandleHi,
-                    hostFenceHandleLo,
-                    hostFenceHandleHi,
-                };
-
-                struct drm_virtgpu_execbuffer execbuffer = {
-                    .flags = (uint32_t)(mFeatureInfo->hasVulkanAsyncQsri ?
-                                        (VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX) :
-                                        VIRTGPU_EXECBUF_FENCE_FD_OUT),
-                    .size = 5 * sizeof(uint32_t),
-                    .command = (uint64_t)(cmdDwords),
-                    .bo_handles = 0,
-                    .num_bo_handles = 0,
-                    .fence_fd = -1,
-                    .ring_idx = 0,
-                };
-
-                int res = drmIoctl(mRendernodeFd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &execbuffer);
-                if (res) {
-                    ALOGE("%s: Failed to virtgpu execbuffer: sterror: %s errno: %d\n", __func__,
-                            strerror(errno), errno);
-                    abort();
-                }
-
-                info.syncFd = execbuffer.fence_fd;
-#endif
+                info.syncFd.emplace(osHandle);
             } else {
                 ensureSyncDeviceFd();
 
@@ -5481,7 +5435,7 @@ public:
                             get_host_u64_VkSemaphore(*pSemaphore) /* the handle */,
                             GOLDFISH_SYNC_VULKAN_SEMAPHORE_SYNC /* thread handle (doubling as type field) */,
                             &syncFd);
-                    info.syncFd = syncFd;
+                    info.syncFd.emplace(syncFd);
                 }
             }
         }
@@ -5515,7 +5469,8 @@ public:
             auto it = info_VkSemaphore.find(pGetFdInfo->semaphore);
             if (it == info_VkSemaphore.end()) return VK_ERROR_OUT_OF_HOST_MEMORY;
             auto& semInfo = it->second;
-            *pFd = dup(semInfo.syncFd);
+            // syncFd is supposed to have value.
+            *pFd = dup(semInfo.syncFd.value_or(-1));
             return VK_SUCCESS;
         } else {
             // opaque fd
@@ -5556,11 +5511,11 @@ public:
             auto semaphoreIt = info_VkSemaphore.find(pImportSemaphoreFdInfo->semaphore);
             auto& info = semaphoreIt->second;
 
-            if (info.syncFd >= 0) {
-                close(info.syncFd);
+            if (info.syncFd.value_or(-1) >= 0) {
+                close(info.syncFd.value());
             }
 
-            info.syncFd = pImportSemaphoreFdInfo->fd;
+            info.syncFd.emplace(pImportSemaphoreFdInfo->fd);
 
             return VK_SUCCESS;
         } else {
@@ -5850,8 +5805,8 @@ public:
                     }
 #endif
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
-                    if (semInfo.syncFd >= 0) {
-                        pre_signal_sync_fds.push_back(semInfo.syncFd);
+                    if (semInfo.syncFd.has_value()) {
+                        pre_signal_sync_fds.push_back(semInfo.syncFd.value());
                         pre_signal_semaphores.push_back(pSubmits[i].pWaitSemaphores[j]);
                     }
 #endif
@@ -5879,8 +5834,8 @@ public:
                     }
 #endif
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
-                    if (semInfo.syncFd >= 0) {
-                        post_wait_sync_fds.push_back(semInfo.syncFd);
+                    if (semInfo.syncFd.value_or(-1) >= 0) {
+                        post_wait_sync_fds.push_back(semInfo.syncFd.value());
                     }
 #endif
                 }
@@ -5915,13 +5870,19 @@ public:
 #endif
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
             for (auto fd : pre_signal_sync_fds) {
-                preSignalTasks.push_back([fd] {
-                    sync_wait(fd, 3000);
-                });
+                // https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkImportSemaphoreFdInfoKHR.html
+                // fd == -1 is treated as already signaled
+                if (fd != -1) {
+                    preSignalTasks.push_back([fd] {
+                        sync_wait(fd, 3000);
+                    });
+                }
             }
 #endif
-            auto waitGroupHandle = mWorkPool.schedule(preSignalTasks);
-            mWorkPool.waitAll(waitGroupHandle);
+            if (!preSignalTasks.empty()) {
+                auto waitGroupHandle = mWorkPool.schedule(preSignalTasks);
+                mWorkPool.waitAll(waitGroupHandle);
+            }
 
             VkSubmitInfo submit_info = {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -6032,6 +5993,7 @@ public:
         return enc->vkQueueWaitIdle(queue, true /* do lock */);
     }
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
     void unwrap_VkNativeBufferANDROID(
         const VkImageCreateInfo* pCreateInfo,
         VkImageCreateInfo* local_pCreateInfo) {
@@ -6063,7 +6025,6 @@ public:
     }
 
     void unwrap_vkAcquireImageANDROID_nativeFenceFd(int fd, int*) {
-#if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
         if (fd != -1) {
             AEMU_SCOPED_TRACE("waitNativeFenceInAcquire");
             // Implicit Synchronization
@@ -6081,8 +6042,8 @@ public:
             // Therefore, assume contract where we need to close fd in this driver
             close(fd);
         }
-#endif
     }
+#endif
 
     // Action of vkMapMemoryIntoAddressSpaceGOOGLE:
     // 1. preprocess (on_vkMapMemoryIntoAddressSpaceGOOGLE_pre):
@@ -6461,8 +6422,10 @@ public:
         }
 #endif
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
         VkAndroidHardwareBufferUsageANDROID* output_ahw_usage =
             vk_find_struct<VkAndroidHardwareBufferUsageANDROID>(pImageFormatProperties);
+#endif
 
         VkResult hostRes;
 
@@ -6499,12 +6462,14 @@ public:
         }
 #endif
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
         if (output_ahw_usage) {
             output_ahw_usage->androidHardwareBufferUsage =
                 getAndroidHardwareBufferUsageFromVkUsage(
                     pImageFormatInfo->flags,
                     pImageFormatInfo->usage);
         }
+#endif
 
         return hostRes;
     }
@@ -6918,56 +6883,39 @@ public:
         return res;
     }
 
-    int exportSyncFdForQSRILocked(VkImage image) {
-        int fd = -1;
-#if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    VkResult exportSyncFdForQSRILocked(VkImage image, int *fd) {
+
         ALOGV("%s: call for image %p hos timage handle 0x%llx\n", __func__, (void*)image,
-                (unsigned long long)get_host_u64_VkImage(image));
+              (unsigned long long)get_host_u64_VkImage(image));
+
         if (mFeatureInfo->hasVirtioGpuNativeSync) {
-#ifndef HOST_BUILD
+            struct VirtGpuExecBuffer exec = { };
+            struct gfxstreamCreateQSRIExportVK exportQSRI = { };
+            VirtGpuDevice& instance = VirtGpuDevice::getInstance();
+
             uint64_t hostImageHandle = get_host_u64_VkImage(image);
-            uint32_t hostImageHandleLo = (uint32_t)hostImageHandle;
-            uint32_t hostImageHandleHi = (uint32_t)(hostImageHandle >> 32);
 
-#define VIRTIO_GPU_NATIVE_SYNC_VULKAN_QSRI_EXPORT 0xa002
+            exportQSRI.hdr.opCode = GFXSTREAM_CREATE_QSRI_EXPORT_VK;
+            exportQSRI.imageHandleLo = (uint32_t)hostImageHandle;
+            exportQSRI.imageHandleHi = (uint32_t)(hostImageHandle >> 32);
 
-            uint32_t cmdDwords[3] = {
-                VIRTIO_GPU_NATIVE_SYNC_VULKAN_QSRI_EXPORT,
-                hostImageHandleLo,
-                hostImageHandleHi,
-            };
+            exec.command = static_cast<void*>(&exportQSRI);
+            exec.command_size = sizeof(exportQSRI);
+            exec.flags = kFenceOut | kRingIdx;
+            if (instance.execBuffer(exec, nullptr))
+                return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-            struct drm_virtgpu_execbuffer execbuffer = {
-                // Assume fence context support if we enabled hasVulkanAsyncQsri
-                .flags = VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX,
-                .size = sizeof(cmdDwords),
-                .command = (uint64_t)(cmdDwords),
-                .bo_handles = 0,
-                .num_bo_handles = 0,
-                .fence_fd = -1,
-                .ring_idx = 0,
-            };
-
-            int res = drmIoctl(mRendernodeFd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &execbuffer);
-            if (res) {
-                ALOGE("%s: Failed to virtgpu execbuffer: sterror: %s errno: %d\n", __func__,
-                        strerror(errno), errno);
-                abort();
-            }
-
-            fd = execbuffer.fence_fd;
-#endif // !defined(HOST_BUILD)
+            *fd = exec.handle.osHandle;
         } else {
             goldfish_sync_queue_work(
                     mSyncDeviceFd,
                     get_host_u64_VkImage(image) /* the handle */,
                     GOLDFISH_SYNC_VULKAN_QSRI /* thread handle (doubling as type field) */,
-                    &fd);
+                    fd);
         }
-        ALOGV("%s: got fd: %d\n", __func__, fd);
-#endif
 
-#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+        ALOGV("%s: got fd: %d\n", __func__, *fd);
         auto imageInfoIt = info_VkImage.find(image);
         if (imageInfoIt != info_VkImage.end()) {
             auto& imageInfo = imageInfoIt->second;
@@ -6990,7 +6938,7 @@ public:
                 }
             }
 
-            int syncFdDup = dup(fd);
+            int syncFdDup = dup(*fd);
             if (syncFdDup < 0) {
                 ALOGE("%s: Failed to dup() QSRI sync fd : sterror: %s errno: %d",
                       __func__, strerror(errno), errno);
@@ -6998,9 +6946,8 @@ public:
                 imageInfo.pendingQsriSyncFds.push_back(syncFdDup);
             }
         }
-#endif
 
-        return fd;
+        return VK_SUCCESS;
     }
 
     VkResult on_vkQueueSignalReleaseImageANDROID(
@@ -7014,35 +6961,39 @@ public:
 
         (void)input_result;
 
-#if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
         VkEncoder* enc = (VkEncoder*)context;
 
         if (!mFeatureInfo->hasVulkanAsyncQsri) {
             return enc->vkQueueSignalReleaseImageANDROID(queue, waitSemaphoreCount, pWaitSemaphores, image, pNativeFenceFd, true /* lock */);
         }
 
-        AutoLock<RecursiveLock> lock(mLock);
-
-        auto it = info_VkImage.find(image);
-        if (it == info_VkImage.end()) {
-            if (pNativeFenceFd) *pNativeFenceFd = -1;
-            return VK_ERROR_INITIALIZATION_FAILED;
+        {
+            AutoLock<RecursiveLock> lock(mLock);
+            auto it = info_VkImage.find(image);
+            if (it == info_VkImage.end()) {
+                if (pNativeFenceFd) *pNativeFenceFd = -1;
+                return VK_ERROR_INITIALIZATION_FAILED;
+            }
         }
-
-        auto& imageInfo = it->second;
 
         enc->vkQueueSignalReleaseImageANDROIDAsyncGOOGLE(queue, waitSemaphoreCount, pWaitSemaphores, image, true /* lock */);
 
+        AutoLock<RecursiveLock> lock(mLock);
+        VkResult result;
         if (pNativeFenceFd) {
-            *pNativeFenceFd =
-                exportSyncFdForQSRILocked(image);
+            result =
+                exportSyncFdForQSRILocked(image, pNativeFenceFd);
         } else {
-            int syncFd = exportSyncFdForQSRILocked(image);
-            if (syncFd >= 0) close(syncFd);
+            int syncFd;
+            result = exportSyncFdForQSRILocked(image, &syncFd);
+
+            if (syncFd >= 0)
+                close(syncFd);
         }
-#endif
-        return VK_SUCCESS;
+
+        return result;
     }
+#endif
 
     VkResult on_vkCreateGraphicsPipelines(
         void* context,
@@ -7234,7 +7185,6 @@ private:
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(__linux__)
     int mSyncDeviceFd = -1;
-    int mRendernodeFd = -1;
 #endif
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
@@ -7738,11 +7688,15 @@ VkResult ResourceTracker::on_vkImportSemaphoreFdKHR(
 void ResourceTracker::unwrap_VkNativeBufferANDROID(
     const VkImageCreateInfo* pCreateInfo,
     VkImageCreateInfo* local_pCreateInfo) {
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
     mImpl->unwrap_VkNativeBufferANDROID(pCreateInfo, local_pCreateInfo);
+#endif
 }
 
 void ResourceTracker::unwrap_vkAcquireImageANDROID_nativeFenceFd(int fd, int* fd_out) {
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
     mImpl->unwrap_vkAcquireImageANDROID_nativeFenceFd(fd, fd_out);
+#endif
 }
 
 #ifdef VK_USE_PLATFORM_FUCHSIA
@@ -7834,6 +7788,7 @@ VkResult ResourceTracker::on_vkGetBufferCollectionPropertiesFUCHSIA(
 }
 #endif
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
 VkResult ResourceTracker::on_vkGetAndroidHardwareBufferPropertiesANDROID(
     void* context, VkResult input_result,
     VkDevice device,
@@ -7851,6 +7806,7 @@ VkResult ResourceTracker::on_vkGetMemoryAndroidHardwareBufferANDROID(
         context, input_result,
         device, pInfo, pBuffer);
 }
+#endif
 
 VkResult ResourceTracker::on_vkCreateSamplerYcbcrConversion(
     void* context, VkResult input_result,
@@ -8271,6 +8227,7 @@ VkResult ResourceTracker::on_vkAllocateCommandBuffers(
     return mImpl->on_vkAllocateCommandBuffers(context, input_result, device, pAllocateInfo, pCommandBuffers);
 }
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
 VkResult ResourceTracker::on_vkQueueSignalReleaseImageANDROID(
     void* context,
     VkResult input_result,
@@ -8281,6 +8238,7 @@ VkResult ResourceTracker::on_vkQueueSignalReleaseImageANDROID(
     int* pNativeFenceFd) {
     return mImpl->on_vkQueueSignalReleaseImageANDROID(context, input_result, queue, waitSemaphoreCount, pWaitSemaphores, image, pNativeFenceFd);
 }
+#endif
 
 VkResult ResourceTracker::on_vkCreateGraphicsPipelines(
     void* context,
