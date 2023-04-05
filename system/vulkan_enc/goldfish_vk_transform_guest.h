@@ -35,7 +35,9 @@
 #include "vk_platform_compat.h"
 #include "vulkan_gfxstream.h"
 
-namespace goldfish_vk {
+namespace gfxstream {
+namespace vk {
+
 class ResourceTracker;
 #define LIST_TRIVIAL_TRANSFORMED_TYPES(f)      \
     f(VkPhysicalDeviceExternalImageFormatInfo) \
@@ -5566,6 +5568,12 @@ void transform_tohost_VkImportBufferGOOGLE(ResourceTracker* resourceTracker,
 void transform_fromhost_VkImportBufferGOOGLE(ResourceTracker* resourceTracker,
                                              VkImportBufferGOOGLE* toTransform);
 
+void transform_tohost_VkCreateBlobGOOGLE(ResourceTracker* resourceTracker,
+                                         VkCreateBlobGOOGLE* toTransform);
+
+void transform_fromhost_VkCreateBlobGOOGLE(ResourceTracker* resourceTracker,
+                                           VkCreateBlobGOOGLE* toTransform);
+
 #endif
 #ifdef VK_EXT_global_priority_query
 void transform_tohost_VkPhysicalDeviceGlobalPriorityQueryFeaturesEXT(
@@ -5802,4 +5810,5 @@ void transform_fromhost_VkPhysicalDeviceRayQueryFeaturesKHR(
 
 #endif
 
-}  // namespace goldfish_vk
+}  // namespace vk
+}  // namespace gfxstream

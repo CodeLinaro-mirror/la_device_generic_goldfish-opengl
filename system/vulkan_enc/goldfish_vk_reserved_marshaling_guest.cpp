@@ -37,7 +37,8 @@
 #include "goldfish_vk_extension_structs_guest.h"
 #include "goldfish_vk_private_defs.h"
 
-namespace goldfish_vk {
+namespace gfxstream {
+namespace vk {
 
 void reservedmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureType rootType,
                                       const void* structExtension, uint8_t** ptr);
@@ -16559,6 +16560,24 @@ void reservedmarshal_VkImportBufferGOOGLE(VulkanStreamGuest* vkStream, VkStructu
     *ptr += sizeof(uint32_t);
 }
 
+void reservedmarshal_VkCreateBlobGOOGLE(VulkanStreamGuest* vkStream, VkStructureType rootType,
+                                        const VkCreateBlobGOOGLE* forMarshaling, uint8_t** ptr) {
+    (void)vkStream;
+    (void)rootType;
+    memcpy(*ptr, (VkStructureType*)&forMarshaling->sType, sizeof(VkStructureType));
+    *ptr += sizeof(VkStructureType);
+    if (rootType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+        rootType = forMarshaling->sType;
+    }
+    reservedmarshal_extension_struct(vkStream, rootType, forMarshaling->pNext, ptr);
+    memcpy(*ptr, (uint32_t*)&forMarshaling->blobMem, sizeof(uint32_t));
+    *ptr += sizeof(uint32_t);
+    memcpy(*ptr, (uint32_t*)&forMarshaling->blobFlags, sizeof(uint32_t));
+    *ptr += sizeof(uint32_t);
+    memcpy(*ptr, (uint64_t*)&forMarshaling->blobId, sizeof(uint64_t));
+    *ptr += sizeof(uint64_t);
+}
+
 #endif
 #ifdef VK_EXT_global_priority_query
 void reservedmarshal_VkPhysicalDeviceGlobalPriorityQueryFeaturesEXT(
@@ -19366,6 +19385,12 @@ void reservedmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureTy
                         ptr);
                     break;
                 }
+                case VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO: {
+                    reservedmarshal_VkCreateBlobGOOGLE(
+                        vkStream, rootType,
+                        reinterpret_cast<const VkCreateBlobGOOGLE*>(structExtension), ptr);
+                    break;
+                }
                 default: {
                     reservedmarshal_VkPhysicalDeviceFragmentDensityMapPropertiesEXT(
                         vkStream, rootType,
@@ -20159,6 +20184,12 @@ void reservedmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureTy
                 ptr);
             break;
         }
+        case VK_STRUCTURE_TYPE_CREATE_BLOB_GOOGLE: {
+            reservedmarshal_VkCreateBlobGOOGLE(
+                vkStream, rootType, reinterpret_cast<const VkCreateBlobGOOGLE*>(structExtension),
+                ptr);
+            break;
+        }
 #endif
 #ifdef VK_EXT_global_priority_query
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES_EXT: {
@@ -20280,4 +20311,5 @@ void reservedmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureTy
     }
 }
 
-}  // namespace goldfish_vk
+}  // namespace vk
+}  // namespace gfxstream

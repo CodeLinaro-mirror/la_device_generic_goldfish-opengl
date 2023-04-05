@@ -35,7 +35,9 @@
 #include "vk_platform_compat.h"
 #include "vulkan_gfxstream.h"
 
-namespace goldfish_vk {
+namespace gfxstream {
+namespace vk {
+
 #ifdef VK_VERSION_1_0
 void count_VkExtent2D(uint32_t featureBits, VkStructureType rootType, const VkExtent2D* toCount,
                       size_t* count);
@@ -3415,6 +3417,9 @@ void count_VkImportColorBufferGOOGLE(uint32_t featureBits, VkStructureType rootT
 void count_VkImportBufferGOOGLE(uint32_t featureBits, VkStructureType rootType,
                                 const VkImportBufferGOOGLE* toCount, size_t* count);
 
+void count_VkCreateBlobGOOGLE(uint32_t featureBits, VkStructureType rootType,
+                              const VkCreateBlobGOOGLE* toCount, size_t* count);
+
 #endif
 #ifdef VK_EXT_global_priority_query
 void count_VkPhysicalDeviceGlobalPriorityQueryFeaturesEXT(
@@ -3570,4 +3575,5 @@ void count_VkPhysicalDeviceRayQueryFeaturesKHR(uint32_t featureBits, VkStructure
 
 #endif
 
-}  // namespace goldfish_vk
+}  // namespace vk
+}  // namespace gfxstream

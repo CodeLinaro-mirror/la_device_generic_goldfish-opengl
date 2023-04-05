@@ -38,7 +38,8 @@
 #include "vulkan_gfxstream.h"
 class IOStream;
 
-namespace goldfish_vk {
+namespace gfxstream {
+namespace vk {
 
 using android::base::guest::HealthMonitor;
 
@@ -2029,6 +2030,7 @@ class VkEncoder {
                                                  VkDeviceMemory deviceMemory,
                                                  VkDeviceSize dataOffset, VkDeviceSize dataSize,
                                                  uint32_t doLock);
+    VkResult vkGetBlobGOOGLE(VkDevice device, VkDeviceMemory memory, uint32_t doLock);
 #endif
 #ifdef VK_EXT_global_priority_query
 #endif
@@ -2149,4 +2151,5 @@ class VkEncoder {
     HealthMonitor<>* mHealthMonitor;
 };
 
-}  // namespace goldfish_vk
+}  // namespace vk
+}  // namespace gfxstream

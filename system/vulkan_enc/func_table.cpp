@@ -46,7 +46,8 @@
 // implement them completely on the guest side.
 #undef VK_KHR_android_surface
 
-namespace goldfish_vk {
+namespace gfxstream {
+namespace vk {
 
 static void sOnInvalidDynamicallyCheckedCall(const char* apiname, const char* neededFeature) {
     ALOGE("invalid call to %s: %s not supported", apiname, neededFeature);
@@ -8435,6 +8436,24 @@ static void entry_vkQueueFlushCommandsFromAuxMemoryGOOGLE(VkQueue queue,
     vkEnc->vkQueueFlushCommandsFromAuxMemoryGOOGLE(queue, commandBuffer, deviceMemory, dataOffset,
                                                    dataSize, true /* do lock */);
 }
+static VkResult entry_vkGetBlobGOOGLE(VkDevice device, VkDeviceMemory memory) {
+    AEMU_SCOPED_TRACE("vkGetBlobGOOGLE");
+    auto vkEnc = ResourceTracker::getThreadLocalEncoder();
+    VkResult vkGetBlobGOOGLE_VkResult_return = (VkResult)0;
+    vkGetBlobGOOGLE_VkResult_return = vkEnc->vkGetBlobGOOGLE(device, memory, true /* do lock */);
+    return vkGetBlobGOOGLE_VkResult_return;
+}
+static VkResult dynCheck_entry_vkGetBlobGOOGLE(VkDevice device, VkDeviceMemory memory) {
+    auto resources = ResourceTracker::get();
+    if (!resources->hasDeviceExtension(device, "VK_GOOGLE_gfxstream")) {
+        sOnInvalidDynamicallyCheckedCall("vkGetBlobGOOGLE", "VK_GOOGLE_gfxstream");
+    }
+    AEMU_SCOPED_TRACE("vkGetBlobGOOGLE");
+    auto vkEnc = ResourceTracker::getThreadLocalEncoder();
+    VkResult vkGetBlobGOOGLE_VkResult_return = (VkResult)0;
+    vkGetBlobGOOGLE_VkResult_return = vkEnc->vkGetBlobGOOGLE(device, memory, true /* do lock */);
+    return vkGetBlobGOOGLE_VkResult_return;
+}
 #endif
 #ifdef VK_EXT_global_priority_query
 #endif
@@ -10837,6 +10856,9 @@ void* goldfish_vulkan_get_proc_address(const char* name) {
     if (!strcmp(name, "vkQueueFlushCommandsFromAuxMemoryGOOGLE")) {
         return nullptr;
     }
+    if (!strcmp(name, "vkGetBlobGOOGLE")) {
+        return nullptr;
+    }
 #endif
 #ifdef VK_EXT_multi_draw
     if (!strcmp(name, "vkCmdDrawMultiEXT")) {
@@ -13039,6 +13061,10 @@ void* goldfish_vulkan_get_instance_proc_address(VkInstance instance, const char*
     if (!strcmp(name, "vkQueueFlushCommandsFromAuxMemoryGOOGLE")) {
         bool hasExt = resources->hasInstanceExtension(instance, "VK_GOOGLE_gfxstream");
         return hasExt ? (void*)entry_vkQueueFlushCommandsFromAuxMemoryGOOGLE : nullptr;
+    }
+    if (!strcmp(name, "vkGetBlobGOOGLE")) {
+        bool hasExt = resources->hasInstanceExtension(instance, "VK_GOOGLE_gfxstream");
+        return hasExt ? (void*)dynCheck_entry_vkGetBlobGOOGLE : nullptr;
     }
 #endif
 #ifdef VK_EXT_multi_draw
@@ -15285,6 +15311,10 @@ void* goldfish_vulkan_get_device_proc_address(VkDevice device, const char* name)
         bool hasExt = resources->hasDeviceExtension(device, "VK_GOOGLE_gfxstream");
         return hasExt ? (void*)entry_vkQueueFlushCommandsFromAuxMemoryGOOGLE : nullptr;
     }
+    if (!strcmp(name, "vkGetBlobGOOGLE")) {
+        bool hasExt = resources->hasDeviceExtension(device, "VK_GOOGLE_gfxstream");
+        return hasExt ? (void*)entry_vkGetBlobGOOGLE : nullptr;
+    }
 #endif
 #ifdef VK_EXT_multi_draw
     if (!strcmp(name, "vkCmdDrawMultiEXT")) {
@@ -15397,4 +15427,5 @@ void* goldfish_vulkan_get_device_proc_address(VkDevice device, const char* name)
     return nullptr;
 }
 
-}  // namespace goldfish_vk
+}  // namespace vk
+}  // namespace gfxstream

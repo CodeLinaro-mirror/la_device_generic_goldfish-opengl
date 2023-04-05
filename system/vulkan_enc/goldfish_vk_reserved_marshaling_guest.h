@@ -44,7 +44,9 @@
 #undef VK_KHR_android_surface
 #undef VK_ANDROID_external_memory_android_hardware_buffer
 
-namespace goldfish_vk {
+namespace gfxstream {
+namespace vk {
+
 #ifdef VK_VERSION_1_0
 void reservedmarshal_VkExtent2D(VulkanStreamGuest* vkStream, VkStructureType rootType,
                                 const VkExtent2D* forMarshaling, uint8_t** ptr);
@@ -3705,6 +3707,9 @@ void reservedmarshal_VkImportColorBufferGOOGLE(VulkanStreamGuest* vkStream,
 void reservedmarshal_VkImportBufferGOOGLE(VulkanStreamGuest* vkStream, VkStructureType rootType,
                                           const VkImportBufferGOOGLE* forMarshaling, uint8_t** ptr);
 
+void reservedmarshal_VkCreateBlobGOOGLE(VulkanStreamGuest* vkStream, VkStructureType rootType,
+                                        const VkCreateBlobGOOGLE* forMarshaling, uint8_t** ptr);
+
 #endif
 #ifdef VK_EXT_global_priority_query
 void reservedmarshal_VkPhysicalDeviceGlobalPriorityQueryFeaturesEXT(
@@ -3863,4 +3868,5 @@ void reservedmarshal_VkPhysicalDeviceRayQueryFeaturesKHR(
 
 #endif
 
-}  // namespace goldfish_vk
+}  // namespace vk
+}  // namespace gfxstream
