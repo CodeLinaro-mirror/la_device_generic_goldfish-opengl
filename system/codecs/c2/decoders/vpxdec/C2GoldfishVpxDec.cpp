@@ -25,11 +25,8 @@
 
 #include <C2AllocatorGralloc.h>
 #include <C2PlatformSupport.h>
-//#include <android/hardware/graphics/common/1.0/types.h>
 
-#include <android/hardware/graphics/allocator/3.0/IAllocator.h>
 #include <android/hardware/graphics/mapper/3.0/IMapper.h>
-#include <hidl/LegacySupport.h>
 
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
@@ -49,7 +46,6 @@
 #define DDD(...) ((void)0)
 #endif
 using ::android::hardware::graphics::common::V1_0::BufferUsage;
-using ::android::hardware::graphics::common::V1_2::PixelFormat;
 
 namespace android {
 constexpr size_t kMinInputBufferSize = 6 * 1024 * 1024;
