@@ -579,12 +579,6 @@ c2_status_t C2GoldfishVpxDec::onFlush_sm() {
 
 status_t C2GoldfishVpxDec::initDecoder() {
     ALOGI("calling init GoldfishVPX");
-#ifdef VP9
-    mMode = MODE_VP9;
-#else
-    mMode = MODE_VP8;
-#endif
-
     mWidth = 320;
     mHeight = 240;
     mFrameParallelMode = false;
@@ -602,7 +596,11 @@ void C2GoldfishVpxDec::checkContext(const std::shared_ptr<C2BlockPool> &pool) {
     mHeight = mIntf->height();
     ALOGI("created decoder context w %d h %d", mWidth, mHeight);
     mCtx = new vpx_codec_ctx_t;
-    mCtx->vpversion = mMode == MODE_VP8 ? 8 : 9;
+#ifdef VP9
+    mCtx->vpversion = 9;
+#else
+    mCtx->vpversion = 8;
+#endif
 
     //const bool isGraphic = (pool->getLocalId() == C2PlatformAllocatorStore::GRALLOC);
     const bool isGraphic = (pool->getAllocatorId() & C2Allocator::GRAPHIC);
@@ -760,7 +758,8 @@ void C2GoldfishVpxDec::process(const std::unique_ptr<C2Work> &work,
         (int)work->input.ordinal.timestamp.peeku(),
         (int)work->input.ordinal.frameIndex.peeku(), work->input.flags);
 
-    if (mMode == MODE_VP8) {
+#ifndef VP9
+    {
         constexpr uint64_t ONE_SECOND_IN_MICRO_SECOND = 1000 * 1000;
         // bug: 349159609
         // note, vp8 does not have the FLAG_CODEC_CONFIG and the test
@@ -790,6 +789,7 @@ void C2GoldfishVpxDec::process(const std::unique_ptr<C2Work> &work,
             m_matrix = defaultColorAspects->matrix;
         }
     }
+#endif  // #ifndef VP9
 
     if (codecConfig) {
         {
@@ -805,10 +805,10 @@ void C2GoldfishVpxDec::process(const std::unique_ptr<C2Work> &work,
         }
 
         DDD("%s %d updated coloraspect due to codec config", __func__, __LINE__);
-        if (mMode == MODE_VP9) {
-            fillEmptyWork(work);
-            return;
-        }
+#ifdef VP9
+        fillEmptyWork(work);
+        return;
+#endif
     }
 
     sendMetadata();

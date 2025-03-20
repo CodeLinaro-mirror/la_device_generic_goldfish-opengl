@@ -41,11 +41,6 @@ struct C2GoldfishVpxDec : public SimpleC2Component {
                       const std::shared_ptr<C2BlockPool> &pool) override;
 
   private:
-    enum {
-        MODE_VP8,
-        MODE_VP9,
-    } mMode;
-
     struct ConversionQueue;
 
     class ConverterThread : public Thread {
@@ -92,12 +87,13 @@ struct C2GoldfishVpxDec : public SimpleC2Component {
     vpx_codec_ctx_t *mCtx{nullptr};
     vpx_image_t *mImg{nullptr};
 
-    // this is VP8 only
+#ifndef VP9
     uint64_t mLastPts { 0 };
     C2Color::range_t m_range;
     C2Color::primaries_t m_primaries;
     C2Color::transfer_t m_transfer;
     C2Color::matrix_t m_matrix;
+#endif
 
     MetaDataColorAspects mSentMetadata = {1, 0, 0, 0};
 
