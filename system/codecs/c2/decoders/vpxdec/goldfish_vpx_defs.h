@@ -1,12 +1,13 @@
 #ifndef MY_VPX_DEFS_H_
 #define MY_VPX_DEFS_H_
 
+#include <cstdint>
+
 #define VPX_IMG_FMT_PLANAR 0x100       /**< Image is a planar format. */
 #define VPX_IMG_FMT_UV_FLIP 0x200      /**< V plane precedes U in memory. */
 #define VPX_IMG_FMT_HAS_ALPHA 0x400    /**< Image has an alpha channel. */
 #define VPX_IMG_FMT_HIGHBITDEPTH 0x800 /**< Image uses 16bit framebuffer. */
 
-typedef unsigned char uint8_t;
 typedef int vpx_codec_err_t;
 
 enum class RenderMode {
