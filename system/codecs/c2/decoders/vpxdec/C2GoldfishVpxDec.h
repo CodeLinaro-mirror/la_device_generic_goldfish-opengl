@@ -59,43 +59,19 @@ struct C2GoldfishVpxDec : public SimpleC2Component {
         std::shared_ptr<Mutexed<ConversionQueue>> mQueue;
     };
 
-    // create context that talks to host decoder: it needs to use
-    // pool to decide whether decoding to host color buffer ot
-    // decode to guest bytebuffer when pool cannot fetch valid host
-    // color buffer id
-    void checkContext(const std::shared_ptr<C2BlockPool> &pool);
-    bool mEnableAndroidNativeBuffers{true};
-
-    void setup_ctx_parameters(vpx_codec_ctx_t *ctx, int hostColorBufferId = -1);
-
-    std::shared_ptr<C2StreamColorAspectsTuning::output> mColorAspects;
-
-
-    std::shared_ptr<IntfImpl> mIntf;
-    vpx_codec_ctx_t *mCtx;
-    bool mFrameParallelMode; // Frame parallel is only supported by VP9 decoder.
-    vpx_image_t *mImg;
-
-    uint32_t mWidth;
-    uint32_t mHeight;
-    bool mSignalledOutputEos;
-    bool mSignalledError;
-
-    // this is VP8 only
-    uint64_t mLastPts { 0 };
-
-    C2Color::range_t m_range;
-    C2Color::primaries_t m_primaries;
-    C2Color::transfer_t m_transfer;
-    C2Color::matrix_t m_matrix;
-
     struct ConversionQueue {
         std::list<std::function<void()>> entries;
         Condition cond;
         size_t numPending{0u};
     };
-    std::shared_ptr<Mutexed<ConversionQueue>> mQueue;
-    std::vector<sp<ConverterThread>> mConverterThreads;
+
+    // create context that talks to host decoder: it needs to use
+    // pool to decide whether decoding to host color buffer ot
+    // decode to guest bytebuffer when pool cannot fetch valid host
+    // color buffer id
+    void checkContext(const std::shared_ptr<C2BlockPool> &pool);
+
+    void setup_ctx_parameters(vpx_codec_ctx_t *ctx, int hostColorBufferId = -1);
 
     status_t initDecoder();
     status_t destroyDecoder();
@@ -107,8 +83,30 @@ struct C2GoldfishVpxDec : public SimpleC2Component {
                               const std::shared_ptr<C2BlockPool> &pool,
                               const std::unique_ptr<C2Work> &work);
 
-    MetaDataColorAspects mSentMetadata = {1, 0, 0, 0};
     void sendMetadata();
+
+    std::shared_ptr<C2StreamColorAspectsTuning::output> mColorAspects;
+    std::shared_ptr<IntfImpl> mIntf;
+    std::shared_ptr<Mutexed<ConversionQueue>> mQueue;
+    std::vector<sp<ConverterThread>> mConverterThreads;
+    vpx_codec_ctx_t *mCtx{nullptr};
+    vpx_image_t *mImg{nullptr};
+
+    // this is VP8 only
+    uint64_t mLastPts { 0 };
+    C2Color::range_t m_range;
+    C2Color::primaries_t m_primaries;
+    C2Color::transfer_t m_transfer;
+    C2Color::matrix_t m_matrix;
+
+    MetaDataColorAspects mSentMetadata = {1, 0, 0, 0};
+
+    uint32_t mWidth{0};
+    uint32_t mHeight{0};
+    bool mEnableAndroidNativeBuffers{true};
+    bool mSignalledOutputEos{false};
+    bool mSignalledError{false};
+    bool mFrameParallelMode{false}; // Frame parallel is only supported by VP9 decoder.
 
     C2_DO_NOT_COPY(C2GoldfishVpxDec);
 };

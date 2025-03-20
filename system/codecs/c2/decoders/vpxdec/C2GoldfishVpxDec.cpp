@@ -503,7 +503,7 @@ C2GoldfishVpxDec::C2GoldfishVpxDec(const char *name, c2_node_id_t id,
                                    const std::shared_ptr<IntfImpl> &intfImpl)
     : SimpleC2Component(
           std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
-      mIntf(intfImpl), mCtx(nullptr), mQueue(new Mutexed<ConversionQueue>) {}
+      mIntf(intfImpl), mQueue(new Mutexed<ConversionQueue>) {}
 
 C2GoldfishVpxDec::~C2GoldfishVpxDec() { onRelease(); }
 
