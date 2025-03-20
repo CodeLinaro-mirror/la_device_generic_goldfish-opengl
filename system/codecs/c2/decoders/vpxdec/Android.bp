@@ -7,6 +7,19 @@ package {
     default_applicable_licenses: ["device_generic_goldfish-opengl_license"],
 }
 
+cc_library_static {
+    name: "goldfish_vpx_impl",
+    vendor: true,
+    srcs: [
+        "goldfish_vpx_impl.cpp",
+    ],
+    shared_libs: [
+        "libcodec2_goldfish_common",
+        "libgoldfish_codec2_store",
+        "liblog",
+    ],
+}
+
 cc_defaults {
     name: "libcodec2_goldfish_vpXdec_defaults",
     defaults: [
@@ -16,13 +29,13 @@ cc_defaults {
     vendor: true,
     srcs: [
         "C2GoldfishVpxDec.cpp",
-        "goldfish_vpx_impl.cpp",
     ],
     header_libs: [
         "libgralloc_cb.ranchu",
     ],
     static_libs: [
         "android.hardware.graphics.common-V6-ndk",
+        "goldfish_vpx_impl",
     ],
     shared_libs: [
         "libgoldfish_codec2_store",
