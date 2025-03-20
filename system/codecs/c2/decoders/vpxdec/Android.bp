@@ -21,8 +21,10 @@ cc_defaults {
     header_libs: [
         "libgralloc_cb.ranchu",
     ],
+    static_libs: [
+        "android.hardware.graphics.common-V6-ndk",
+    ],
     shared_libs: [
-        "android.hardware.graphics.mapper@3.0",
         "libgoldfish_codec2_store",
         "libvpx",
     ],

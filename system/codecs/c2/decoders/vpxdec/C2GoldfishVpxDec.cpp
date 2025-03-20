@@ -20,13 +20,13 @@
 
 #include <algorithm>
 
+#include <aidl/android/hardware/graphics/common/BufferUsage.h>
+
 #include <media/stagefright/foundation/AUtils.h>
 #include <media/stagefright/foundation/MediaDefs.h>
 
 #include <C2AllocatorGralloc.h>
 #include <C2PlatformSupport.h>
-
-#include <android/hardware/graphics/mapper/3.0/IMapper.h>
 
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
@@ -45,7 +45,8 @@
 #else
 #define DDD(...) ((void)0)
 #endif
-using ::android::hardware::graphics::common::V1_0::BufferUsage;
+
+using aidl::android::hardware::graphics::common::BufferUsage;
 
 namespace android {
 constexpr size_t kMinInputBufferSize = 6 * 1024 * 1024;
@@ -609,7 +610,7 @@ void C2GoldfishVpxDec::checkContext(const std::shared_ptr<C2BlockPool> &pool) {
     if (isGraphic) {
         uint64_t client_usage = getClientUsage(pool);
         DDD("client has usage as 0x%llx", client_usage);
-        if (client_usage & BufferUsage::CPU_READ_MASK) {
+        if (client_usage & static_cast<uint32_t>(BufferUsage::CPU_READ_MASK)) {
             DDD("decoding to guest byte buffer as client has read usage");
             mEnableAndroidNativeBuffers = false;
         } else {
