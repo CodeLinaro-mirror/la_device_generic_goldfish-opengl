@@ -30,29 +30,31 @@ enum vpx_img_fmt_t {
 };
 
 struct vpx_image_t {
-    vpx_img_fmt_t fmt; /**< Image Format */
-    unsigned int d_w;  /**< Displayed image width */
-    unsigned int d_h;  /**< Displayed image height */
     void *user_priv;
+    uint32_t d_w;       /**< Displayed image width */
+    uint32_t d_h;       /**< Displayed image height */
+    vpx_img_fmt_t fmt;  /**< Image Format */
 };
 
 #define VPX_CODEC_OK 0
 
 struct vpx_codec_ctx_t {
-    int vpversion; // 8: vp8 or 9: vp9
-    int version;   // 100: return decoded frame to guest; 200: render on host
-    int hostColorBufferId;
-    uint64_t id; // >= 1, unique
-    int memory_slot;
-    uint64_t address_offset = 0;
-    size_t outputBufferWidth;
-    size_t outputBufferHeight;
-    size_t width;
-    size_t height;
-    size_t bpp;
+    vpx_image_t myImg;
     uint8_t *data;
     uint8_t *dst;
-    vpx_image_t myImg;
+    uint64_t address_offset = 0;
+    uint64_t id; // >= 1, unique
+
+    uint32_t outputBufferWidth;
+    uint32_t outputBufferHeight;
+    uint32_t width;
+    uint32_t height;
+
+    int hostColorBufferId;
+    int memory_slot;
+    int version;        // 100: return decoded frame to guest; 200: render on host
+    uint8_t vpversion;  // 8: vp8 or 9: vp9
+    uint8_t bpp;
 };
 
 int vpx_codec_destroy(vpx_codec_ctx_t *);

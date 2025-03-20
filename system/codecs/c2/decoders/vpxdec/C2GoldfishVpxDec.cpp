@@ -883,8 +883,7 @@ void C2GoldfishVpxDec::setup_ctx_parameters(vpx_codec_ctx_t *ctx,
     ctx->hostColorBufferId = hostColorBufferId;
     ctx->outputBufferWidth = mWidth;
     ctx->outputBufferHeight = mHeight;
-    int32_t bpp = 1;
-    ctx->bpp = bpp;
+    ctx->bpp = 1;
 }
 
 status_t
