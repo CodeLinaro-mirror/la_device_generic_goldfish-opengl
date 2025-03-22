@@ -59,9 +59,6 @@ class C2GoldfishAvcDec : public SimpleC2Component {
                       const std::shared_ptr<C2BlockPool> &pool) override;
 
   private:
-    std::unique_ptr<MediaH264Decoder> mContext;
-    bool mEnableAndroidNativeBuffers{true};
-
     void checkMode(const std::shared_ptr<C2BlockPool> &pool);
     //    status_t createDecoder();
     status_t createDecoder();
@@ -79,18 +76,10 @@ class C2GoldfishAvcDec : public SimpleC2Component {
     void resetPlugin();
     void deleteContext();
 
-    std::shared_ptr<IntfImpl> mIntf;
 
     void removePts(uint64_t pts);
     void insertPts(uint32_t work_index, uint64_t pts);
     uint64_t getWorkIndex(uint64_t pts);
-
-    // there are same pts matching to different work indices
-    // this happen during csd0/csd1 switching
-    std::map<uint64_t, uint64_t> mOldPts2Index;
-    std::map<uint64_t, uint64_t> mPts2Index;
-    std::map<uint64_t, uint64_t> mIndex2Pts;
-    uint64_t  mPts {0};
 
     // TODO:This is not the right place for this enum. These should
     // be part of c2-vndk so that they can be accessed by all video plugins
@@ -101,29 +90,6 @@ class C2GoldfishAvcDec : public SimpleC2Component {
         kPreferContainer,
     };
 
-    std::shared_ptr<C2GraphicBlock> mOutBlock;
-    uint8_t *mOutBufferFlush;
-
-    int mHostColorBufferId{-1};
-
-    void getVuiParams(h264_image_t &img);
-    void copyImageData(h264_image_t &img);
-
-    h264_image_t mImg{};
-    uint32_t mConsumedBytes{0};
-    uint8_t *mInPBuffer{nullptr};
-    uint32_t mInPBufferSize;
-    uint32_t mInTsMarker;
-
-    // size_t mNumCores;
-    // uint32_t mOutputDelay;
-    uint32_t mWidth;
-    uint32_t mHeight;
-    uint32_t mStride;
-    bool mSignalledOutputEos;
-    bool mSignalledError;
-    bool mHeaderDecoded;
-    std::atomic_uint64_t mOutIndex;
     // Color aspects. These are ISO values and are meant to detect changes in
     // aspects to avoid converting them to C2 values for each frame
     struct VuiColorAspects {
@@ -140,11 +106,57 @@ class C2GoldfishAvcDec : public SimpleC2Component {
             return primaries == o.primaries && transfer == o.transfer &&
                    coeffs == o.coeffs && fullRange == o.fullRange;
         }
-    } mBitstreamColorAspects;
+    };
 
-    MetaDataColorAspects mSentMetadata = {1, 0, 0, 0};
+    void getVuiParams(h264_image_t &img);
+    void copyImageData(h264_image_t &img);
 
     void sendMetadata();
+
+    void decodeHeaderAfterFlush();
+
+    std::unique_ptr<MediaH264Decoder> mContext;
+    std::shared_ptr<C2GraphicBlock> mOutBlock;
+    std::unique_ptr<GoldfishH264Helper> mH264Helper;
+
+    std::shared_ptr<IntfImpl> mIntf;
+    uint8_t *mOutBufferFlush{nullptr};
+    uint8_t *mInPBuffer{nullptr};
+
+    // there are same pts matching to different work indices
+    // this happen during csd0/csd1 switching
+    std::map<uint64_t, uint64_t> mOldPts2Index;
+    std::map<uint64_t, uint64_t> mPts2Index;
+    std::map<uint64_t, uint64_t> mIndex2Pts;
+
+    std::vector<uint8_t> mCsd0;
+    std::vector<uint8_t> mCsd1;
+
+    std::atomic_uint64_t mOutIndex;
+    uint64_t  mPts {0};
+
+    h264_image_t mImg{};
+    VuiColorAspects mBitstreamColorAspects;
+    MetaDataColorAspects mSentMetadata = {1, 0, 0, 0};
+
+
+    uint32_t mConsumedBytes{0};
+    uint32_t mInPBufferSize{0};
+    uint32_t mInTsMarker{0};
+
+    // size_t mNumCores;
+    // uint32_t mOutputDelay;
+    uint32_t mWidth{0};
+    uint32_t mHeight{0};
+    uint32_t mStride{0};
+
+    int mHostColorBufferId{-1};
+    int mId = -1;
+
+    bool mEnableAndroidNativeBuffers{true};
+    bool mSignalledOutputEos{false};
+    bool mSignalledError{false};
+    bool mHeaderDecoded{false};
 
     // profile
     struct timeval mTimeStart;
@@ -153,13 +165,6 @@ class C2GoldfishAvcDec : public SimpleC2Component {
     char mInFile[200];
 #endif /* FILE_DUMP_ENABLE */
 
-    std::vector<uint8_t> mCsd0;
-    std::vector<uint8_t> mCsd1;
-    void decodeHeaderAfterFlush();
-
-    std::unique_ptr<GoldfishH264Helper> mH264Helper;
-
-    int mId = -1;
     C2_DO_NOT_COPY(C2GoldfishAvcDec);
 };
 
