@@ -380,8 +380,8 @@ C2GoldfishHevcDec::C2GoldfishHevcDec(const char *name, c2_node_id_t id,
                                    const std::shared_ptr<IntfImpl> &intfImpl)
     : SimpleC2Component(
           std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
-      mIntf(intfImpl), mOutBufferFlush(nullptr), mWidth(1920), mHeight(1080),
-      mHeaderDecoded(false), mOutIndex(0u) {
+      mIntf(intfImpl), mOutBufferFlush(nullptr), mOutIndex(0u),
+      mWidth(1920), mHeight(1080), mHeaderDecoded(false) {
     mWidth = mIntf->width();
     mHeight = mIntf->height();
     DDD("creating hevc decoder now w %d h %d", mWidth, mHeight);
