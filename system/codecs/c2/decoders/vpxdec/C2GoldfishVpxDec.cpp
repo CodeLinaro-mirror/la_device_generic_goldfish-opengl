@@ -20,16 +20,13 @@
 
 #include <algorithm>
 
+#include <aidl/android/hardware/graphics/common/BufferUsage.h>
+
 #include <media/stagefright/foundation/AUtils.h>
 #include <media/stagefright/foundation/MediaDefs.h>
 
 #include <C2AllocatorGralloc.h>
 #include <C2PlatformSupport.h>
-//#include <android/hardware/graphics/common/1.0/types.h>
-
-#include <android/hardware/graphics/allocator/3.0/IAllocator.h>
-#include <android/hardware/graphics/mapper/3.0/IMapper.h>
-#include <hidl/LegacySupport.h>
 
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
@@ -48,8 +45,8 @@
 #else
 #define DDD(...) ((void)0)
 #endif
-using ::android::hardware::graphics::common::V1_0::BufferUsage;
-using ::android::hardware::graphics::common::V1_2::PixelFormat;
+
+using aidl::android::hardware::graphics::common::BufferUsage;
 
 namespace android {
 constexpr size_t kMinInputBufferSize = 6 * 1024 * 1024;
@@ -506,7 +503,7 @@ C2GoldfishVpxDec::C2GoldfishVpxDec(const char *name, c2_node_id_t id,
                                    const std::shared_ptr<IntfImpl> &intfImpl)
     : SimpleC2Component(
           std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
-      mIntf(intfImpl), mCtx(nullptr), mQueue(new Mutexed<ConversionQueue>) {}
+      mIntf(intfImpl), mQueue(new Mutexed<ConversionQueue>) {}
 
 C2GoldfishVpxDec::~C2GoldfishVpxDec() { onRelease(); }
 
@@ -582,12 +579,6 @@ c2_status_t C2GoldfishVpxDec::onFlush_sm() {
 
 status_t C2GoldfishVpxDec::initDecoder() {
     ALOGI("calling init GoldfishVPX");
-#ifdef VP9
-    mMode = MODE_VP9;
-#else
-    mMode = MODE_VP8;
-#endif
-
     mWidth = 320;
     mHeight = 240;
     mFrameParallelMode = false;
@@ -605,7 +596,11 @@ void C2GoldfishVpxDec::checkContext(const std::shared_ptr<C2BlockPool> &pool) {
     mHeight = mIntf->height();
     ALOGI("created decoder context w %d h %d", mWidth, mHeight);
     mCtx = new vpx_codec_ctx_t;
-    mCtx->vpversion = mMode == MODE_VP8 ? 8 : 9;
+#ifdef VP9
+    mCtx->vpversion = 9;
+#else
+    mCtx->vpversion = 8;
+#endif
 
     //const bool isGraphic = (pool->getLocalId() == C2PlatformAllocatorStore::GRALLOC);
     const bool isGraphic = (pool->getAllocatorId() & C2Allocator::GRAPHIC);
@@ -613,7 +608,7 @@ void C2GoldfishVpxDec::checkContext(const std::shared_ptr<C2BlockPool> &pool) {
     if (isGraphic) {
         uint64_t client_usage = getClientUsage(pool);
         DDD("client has usage as 0x%llx", client_usage);
-        if (client_usage & BufferUsage::CPU_READ_MASK) {
+        if (client_usage & static_cast<uint32_t>(BufferUsage::CPU_READ_MASK)) {
             DDD("decoding to guest byte buffer as client has read usage");
             mEnableAndroidNativeBuffers = false;
         } else {
@@ -763,7 +758,8 @@ void C2GoldfishVpxDec::process(const std::unique_ptr<C2Work> &work,
         (int)work->input.ordinal.timestamp.peeku(),
         (int)work->input.ordinal.frameIndex.peeku(), work->input.flags);
 
-    if (mMode == MODE_VP8) {
+#ifndef VP9
+    {
         constexpr uint64_t ONE_SECOND_IN_MICRO_SECOND = 1000 * 1000;
         // bug: 349159609
         // note, vp8 does not have the FLAG_CODEC_CONFIG and the test
@@ -793,6 +789,7 @@ void C2GoldfishVpxDec::process(const std::unique_ptr<C2Work> &work,
             m_matrix = defaultColorAspects->matrix;
         }
     }
+#endif  // #ifndef VP9
 
     if (codecConfig) {
         {
@@ -808,10 +805,10 @@ void C2GoldfishVpxDec::process(const std::unique_ptr<C2Work> &work,
         }
 
         DDD("%s %d updated coloraspect due to codec config", __func__, __LINE__);
-        if (mMode == MODE_VP9) {
-            fillEmptyWork(work);
-            return;
-        }
+#ifdef VP9
+        fillEmptyWork(work);
+        return;
+#endif
     }
 
     sendMetadata();
@@ -886,8 +883,7 @@ void C2GoldfishVpxDec::setup_ctx_parameters(vpx_codec_ctx_t *ctx,
     ctx->hostColorBufferId = hostColorBufferId;
     ctx->outputBufferWidth = mWidth;
     ctx->outputBufferHeight = mHeight;
-    int32_t bpp = 1;
-    ctx->bpp = bpp;
+    ctx->bpp = 1;
 }
 
 status_t
