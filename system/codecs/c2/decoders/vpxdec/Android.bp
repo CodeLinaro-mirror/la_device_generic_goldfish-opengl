@@ -7,51 +7,55 @@ package {
     default_applicable_licenses: ["device_generic_goldfish-opengl_license"],
 }
 
-cc_library_shared {
-    name: "libcodec2_goldfish_vp9dec",
+cc_library_static {
+    name: "goldfish_vpx_impl",
     vendor: true,
+    srcs: [
+        "goldfish_vpx_impl.cpp",
+    ],
+    shared_libs: [
+        "libcodec2_goldfish_common",
+        "libgoldfish_codec2_store",
+        "liblog",
+    ],
+}
+
+cc_defaults {
+    name: "libcodec2_goldfish_vpXdec_defaults",
     defaults: [
         "libcodec2_goldfish-defaults",
     ],
 
-    srcs: ["C2GoldfishVpxDec.cpp",
-        "goldfish_vpx_impl.cpp",
+    vendor: true,
+    srcs: [
+        "C2GoldfishVpxDec.cpp",
     ],
-
-    shared_libs: ["libvpx",
-	    "android.hardware.graphics.allocator@3.0",
-		"android.hardware.graphics.mapper@3.0",
-         "libgoldfish_codec2_store",
+    header_libs: [
+        "libgralloc_cb.ranchu",
     ],
-
-   header_libs: [
-    "libgralloc_cb.ranchu",
+    static_libs: [
+        "android.hardware.graphics.common-V6-ndk",
+        "goldfish_vpx_impl",
     ],
-
-    cflags: [
-        "-DVP9",
+    shared_libs: [
+        "libgoldfish_codec2_store",
+        "libvpx",
     ],
 }
 
 cc_library_shared {
     name: "libcodec2_goldfish_vp8dec",
-    vendor: true,
     defaults: [
-        "libcodec2_goldfish-defaults",
+        "libcodec2_goldfish_vpXdec_defaults",
     ],
+}
 
-    srcs: ["C2GoldfishVpxDec.cpp",
-        "goldfish_vpx_impl.cpp",
+cc_library_shared {
+    name: "libcodec2_goldfish_vp9dec",
+    defaults: [
+        "libcodec2_goldfish_vpXdec_defaults",
     ],
-
-
-   header_libs: [
-    "libgralloc_cb.ranchu",
-    ],
-
-    shared_libs: ["libvpx",
-	    "android.hardware.graphics.allocator@3.0",
-		"android.hardware.graphics.mapper@3.0",
-         "libgoldfish_codec2_store",
+    cflags: [
+        "-DVP9",
     ],
 }
