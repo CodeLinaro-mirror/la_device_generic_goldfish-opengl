@@ -43,20 +43,12 @@ struct hevc_image_t {
     int ret;
 };
 
-enum class RenderMode {
+enum class RenderMode : uint8_t {
     RENDER_BY_HOST_GPU = 1,
     RENDER_BY_GUEST_CPU = 2,
 };
 
 class MediaHevcDecoder {
-    uint64_t mHostHandle = 0;
-    uint32_t mVersion = 100;
-    RenderMode mRenderMode = RenderMode::RENDER_BY_GUEST_CPU;
-
-    bool mHasAddressSpaceMemory = false;
-    uint64_t mAddressOffSet = 0;
-    int mSlot = -1;
-
   public:
     MediaHevcDecoder(RenderMode renderMode);
     virtual ~MediaHevcDecoder() = default;
@@ -94,5 +86,12 @@ class MediaHevcDecoder {
 
     void sendMetadata(MetaDataColorAspects *ptr);
 
+  private:
+    uint64_t mHostHandle = 0;
+    uint64_t mAddressOffSet = 0;
+    uint32_t mVersion = 100;
+    int mSlot = -1;
+    RenderMode mRenderMode = RenderMode::RENDER_BY_GUEST_CPU;
+    bool mHasAddressSpaceMemory = false;
 };
 #endif
